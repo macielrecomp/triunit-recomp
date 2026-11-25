@@ -41,7 +41,7 @@ def native(build,runs):
     cc=q.DEFAULT_CC;env={'PATH':str(cc.parent)+os.pathsep+os.environ['PATH']};out=[]
     with q.scratch_tree() as (temp,cleanup):
         exe=temp/'mk3-dma.exe'
-        made=q.command([cc,'-std=c++17','-O2','-Wall','-Wextra','-Werror','-static','-I'+str(ROOT/'native/mk3'),
+        made=q.command([cc,'-std=c++17','-O2','-Wall','-Wextra','-Werror','-static','-I'+str(ROOT/'native/mk3'),'-I'+str(ROOT/'native/include'),
                         ROOT/'native/tests/mk3_dma_tests.cpp','-o',exe],temp,cwd=ROOT,env=env,timeout=180)
         assert made['passed'],q.compact(made);build['seconds']=made['wall_seconds']
         (temp/'gfx.txt').write_text(''.join(f'{o} {s} {p}\n' for p,o,s in reference_dma.graphics_rows()),encoding='utf-8')

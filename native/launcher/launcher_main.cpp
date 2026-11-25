@@ -217,8 +217,8 @@ struct App {
     VideoConfig& video(){return draft.video(videoRemastered);}
     const VideoConfig& video()const{return draft.video(videoRemastered);}
     bool scaleFxActive()const{return nativeVideo()&&video().scalefx;}
-    // Widescreen: the Remastered profile of MK1 and of the native MK2 (DISPLAY > SCREEN: TV FRAME, 4:3, WIDESCREEN).
-    bool widescreenAvailable()const{return (selected==0||(selected==1&&backend.nativeMk2Installed()))&&videoRemastered;}
+    // Widescreen: the Remastered profile of MK1, of the native MK2 and of MK3 (DISPLAY > SCREEN: TV FRAME, 4:3, WIDESCREEN).
+    bool widescreenAvailable()const{return (selected==0||(selected==1&&backend.nativeMk2Installed())||selected==2)&&videoRemastered;}
     bool gameVolumeEnabled()const{return nativeVideo();}
     int menuMusicLevel()const{
         const auto& preferences=settings&&category==launcherTab?draftLauncher:launcher;

@@ -100,6 +100,12 @@ struct Dma {
         return int(pixels);
     }
 
+    // A staged entry's source as dma_w folds it; false: outside the graphics region (skipdma, no draw).
+    static bool Source(uint16_t command, uint16_t low, uint16_t high, uint32_t& source) {
+        source = (command & 0x0f) == 0x0c ? 0 : low | uint32_t(high) << 16;
+        if (source >= 0xf8000000u) source -= 0xf8000000u;
+        return source < kRegionBits;
+    }
 private:
     // EXTRACTGEN (V:426-432): two bytes from the bit offset.
     unsigned Extract(uint32_t bit, unsigned mask) const {
@@ -112,6 +118,17 @@ private:
     // index (command & 0x1f) * 8 + bpp, bpp 0 = 8 bits, mode 0 = dma_draw_none, bit 4 = XFlip; Scale is the
     // xstep/ystep != 0x100 branch (V:815-830). write = false makes only the ROM reads of the write pass.
     void Draw(uint16_t command, uint32_t source, unsigned xstep_reg, unsigned ystep_reg, bool write) {
+        Blit(reg, command, source, xstep_reg, ystep_reg, write, 512, [this](size_t index, uint16_t value) {
+            vram[index] = value;
+            if (observer) observer->Pixel(index, value);
+        });
+    }
+public:
+    // The same blitter over any registers into a destination of `stride` words per line (the widescreen layer,
+    // mk3_wide.hpp): store(index, value) for each word written; write = false makes only the ROM reads.
+    template <class Store>
+    void Blit(const std::array<uint16_t, 18>& reg, uint16_t command, uint32_t source, unsigned xstep_reg, unsigned ystep_reg, bool write,
+              size_t stride, Store&& store_word) const {
         static const Op zero_op[16] = {SKIP, COPY, SKIP, COPY, COLOR_OP, COLOR_OP, COLOR_OP, COLOR_OP,
                                        SKIP, COPY, SKIP, COPY, COLOR_OP, COLOR_OP, COLOR_OP, COLOR_OP};
         static const Op nonzero_op[16] = {SKIP, SKIP, COPY, COPY, SKIP, SKIP, COPY, COPY,
@@ -153,11 +170,8 @@ private:
                     o += uint32_t((tx >> 8) * bpp);
                 }
                 if ((width >> 8) > width_px - endskip_px) width = (width_px - endskip_px) << 8;  // V:496-497
-                uint16_t* const row = &vram[size_t(sy) * 512];
-                const auto store = [&](int x, uint16_t value) {
-                    row[x] = value;
-                    if (observer) observer->Pixel(size_t(sy) * 512 + size_t(x), value);
-                };
+                const size_t row = size_t(sy) * stride;
+                const auto store = [&](int x, uint16_t value) { store_word(row + size_t(x), value); };
                 while (ix < width) {  // V:507-563
                     if (sx >= left && sx <= right) {
                         if (!write) { if (zero != COLOR_OP || nonzero != COLOR_OP) Extract(o, mask); }  // the write pass's reads

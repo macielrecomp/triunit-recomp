@@ -25,6 +25,11 @@
 //                mk5_fighter_bicubic.hpp); presentation only: the canonical state, scanout and hashes are the same.
 //                Headless Remastered with --hashes also prints the scenery pixel count, the fighter layer count, the
 //                kept floor stains and the hash of the 4x frame.
+//   --wide       Remastered: the 16:9 widescreen frame (mk3_wide.hpp; also MK3_WIDESCREEN=1 with --window). --hashes then
+//                adds the wide frame's diagnostics to each frame line and --dump the wide frame (raw and presented)
+//   --dump-4x    with --wide and --dump: each dumped frame also has the wide frame as the window composes it (4x: the
+//                scenery bicubic, the fighter layers) before its filters
+//   --state-hash with --hashes: each frame line also has the hash of main RAM, video RAM and the CPU registers
 //   --dma-census per-producer DMA counts (writer/enqueue PC, display list, scroll word, table routine, graphics bank)
 //   --state-test PLAN  test plan of save states, e.g. save@100,hash@200,load@200,hash@200: each item once, in order, at
 //                the first presented frame >= its number, as F5 (save), F7 (load) or a digest of the state (hash)
@@ -144,6 +149,49 @@ struct CpuTap : mk3::CpuVramObserver {
     mk3::DmaLayers* layers = nullptr;
     void CpuVram(uint32_t pc, size_t word, uint16_t value, uint16_t, uint64_t) override { layers->Cpu(pc, word, value); }
 };
+// Widescreen diagnostics (mk5wide::Layer::debug), per finished build from its scenery draws (mk5wide::Note):
+// parallax: for each scenery layer whose list camera moved and whose centre draws moved by minus that amount, the most
+// frequent move of its draws in the margins must be the same (3 draws or more on each side). A margin where a draw
+// moved like the centre's is no difference: blood drops fly in the world's own list, and three of a spray can pair by
+// chance from one build to the next with the same move, while scenery at the wrong rate leaves no draw at the right one;
+// still: with the world's camera still (the last scenery list), every scenery list's camera is still.
+struct WideChecks {
+    unsigned builds = 0;
+    std::vector<mk5wide::Note> previous;
+    uint64_t parallax_checked = 0, parallax_differ = 0, still_checked = 0, still_moved = 0;
+    void Frame(const mk5wide::Layer<uint16_t>& layer) {
+        if (!layer.debug || layer.builds == builds) return;
+        builds = layer.builds;
+        std::map<std::tuple<uint16_t, uint32_t, uint16_t>, std::array<std::vector<const mk5wide::Note*>, 2>> runs;
+        for (const auto& k : previous) runs[{k.layer, k.source, k.row}][0].push_back(&k);
+        for (const auto& k : layer.notes_done) runs[{k.layer, k.source, k.row}][1].push_back(&k);
+        std::map<uint16_t, std::array<std::map<int, int>, 2>> moves;
+        for (auto& [key, two] : runs) {
+            if (two[0].size() != two[1].size()) continue;
+            for (auto& v : two) std::sort(v.begin(), v.end(), [](const mk5wide::Note* p, const mk5wide::Note* r) { return p->lo < r->lo; });
+            for (size_t i = 0; i < two[1].size(); ++i) {
+                const auto& k = *two[1][i];
+                const bool in_margin = (k.hi <= mk5wide::kWideMargin || k.lo >= mk5wide::kWideMargin + mk5wide::kVisible) && k.hi > 0 && k.lo < mk5wide::kLayerWidth;
+                const bool in_centre = k.lo >= mk5wide::kWideMargin && k.hi <= mk5wide::kWideMargin + mk5wide::kVisible;
+                if (in_margin || in_centre) ++moves[k.layer][in_margin ? 1 : 0][k.lo - two[0][i]->lo];
+            }
+        }
+        const auto mode_of = [](const std::map<int, int>& c) { int best = 0, most = 0; for (const auto& [m, n] : c) if (n > most) { most = n; best = m; } return std::make_pair(best, most); };
+        std::map<uint16_t, int> was, now, camera_move;
+        for (const auto& k : previous) was[k.layer] = k.camera;
+        for (const auto& k : layer.notes_done) { now[k.layer] = k.camera; if (was.count(k.layer)) camera_move[k.layer] = was[k.layer] - k.camera; }
+        for (const auto& [l, both] : moves)
+            if (!both[0].empty() && !both[1].empty() && camera_move.count(l) && camera_move[l] && mode_of(both[0]).first == camera_move[l]) {
+                const auto c = mode_of(both[0]), g = mode_of(both[1]);
+                if (c.second >= 3 && g.second >= 3) { ++parallax_checked; parallax_differ += c.first != g.first && !both[1].count(c.first); }
+            }
+        if (!now.empty() && !was.empty() && was.rbegin()->first == now.rbegin()->first && camera_move.count(now.rbegin()->first) && !camera_move[now.rbegin()->first]) {
+            ++still_checked;
+            for (const auto& [l, move] : camera_move) if (move) { ++still_moved; break; }
+        }
+        previous = layer.notes_done;
+    }
+};
 const char* KindName(mk3::Unverified k) {
     static const char* names[] = {"tms_block", "tms_edge", "adsp_block", "adsp_edge", "dma_path", "irq_path", "device_path"};
     return names[unsigned(k)];
@@ -157,6 +205,7 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
     std::set<uint64_t> dump_frames;
     double linger = -1;
     bool window_on = false, audio_on = false, strict = false, hashes = false, remastered = false, census_on = false, run_ahead = false;
+    bool wide_on = false, state_hash = false, dump_4x = false;
     int watch_dcs = -1;
     std::wstring tape_file, cmos_dir, cmos_out;
     enum class StateRequest { Save, Load, Hash };
@@ -173,6 +222,9 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
         else if (a == "--strict") strict = true;
         else if (a == "--hashes") hashes = true;
         else if (a == "--run-ahead") run_ahead = true;
+        else if (a == "--wide") wide_on = true;
+        else if (a == "--state-hash") state_hash = true;
+        else if (a == "--dump-4x") dump_4x = true;
         else if (a == "--training") mk5hitbox::enabled = true;   // headless: the boxes in each --hashes frame line
         else if (a == "--dma-census") census_on = true;
         else if (a == "--tape" && n + 1 < argc) tape_file = argv[++n];
@@ -251,6 +303,16 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
             b.o.blitter.observer = layers.get(); scanout.layers = layers.get();
             cpu_tap.layers = layers.get(); b.o.vram_observer = &cpu_tap;
         }
+        // Widescreen (MK3_WIDESCREEN=1 from the launcher, Remastered window; --wide headless): the shadow pass's 16:9 frame.
+        if (const char* flag = std::getenv("MK3_WIDESCREEN"); window_on && flag && std::string(flag) == "1") wide_on = true;
+        const bool widescreen = layer2 && wide_on;
+        auto wide = std::make_unique<mk3::Wide>();
+        if (widescreen) {
+            wide->Attach(b, layers.get(), &cpu_tap, &layers->blood); scanout.EnableWide(&wide->layer, true);
+            scanout.wide_dim = [&wide] { return wide->Dim(); };
+        }
+        mk3::Wide* state_wide = widescreen ? wide.get() : nullptr;
+        WideChecks wide_checks;
         uint64_t scenery_frames = 0, scenery_pixels = 0, mismatched = 0;
         uint64_t fighter_frames = 0, fighter_layers = 0, fighter_mismatched = 0;
         mk5presentation::FighterFrame fighters_shown;
@@ -259,7 +321,7 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
 
         std::unique_ptr<Mk5Window> window;
         if (window_on) {
-            window = std::make_unique<Mk5Window>();
+            window = widescreen ? std::make_unique<Mk5Window>(false, mk5wide::kAcross, mk5wide::kDown) : std::make_unique<Mk5Window>();
             mk3host::SetTitle(GameTitle() + (remastered ? L"Remasterizada" : L"Original"));
         }
         std::unique_ptr<mk5audio::WaveOutSink> sink;
@@ -314,11 +376,11 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
         if (census_on) run_ahead = false;
         int ahead = 0;
         mk2::state::Snapshot ahead_state;
-        const auto ahead_fields = [&](auto& a) { host_state([&](auto&... host) { mk3::state::Session(a, b, scanout, state_layers, host...); return 0; }); };
+        const auto ahead_fields = [&](auto& a) { host_state([&](auto&... host) { mk3::state::Session(a, b, scanout, state_layers, state_wide, host...); return 0; }); };
         const auto state_request = [&](StateRequest request) {
             if (census_on) { std::printf("{\"save_state\":\"refused\",\"error\":\"not with --dma-census\"}\n"); return; }
             if (request != StateRequest::Load) {
-                auto bytes = host_state([&](auto&... host) { return mk3::SaveLiveState(program, b, scanout, state_layers, host...); });
+                auto bytes = host_state([&](auto&... host) { return mk3::SaveLiveState(program, b, scanout, state_layers, state_wide, host...); });
                 bool written = false;
                 if (request == StateRequest::Save) {
                     std::error_code error;
@@ -344,7 +406,7 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
                 std::printf("{\"save_state\":\"refused\",\"error\":\"%s\"}\n", e.what());
                 return;
             }
-            host_state([&](auto&... host) { mk3::LoadLiveState(program, bytes, b, scanout, state_layers, host...); return 0; });
+            host_state([&](auto&... host) { mk3::LoadLiveState(program, bytes, b, scanout, state_layers, state_wide, host...); return 0; });
             if (tape.empty()) b.o.ports[2] = dsw;   // the cabinet's switches, not the saved session's
             std::printf("{\"save_state\":\"loaded\",\"frame\":%llu,\"from\":\"%s\"}\n", (unsigned long long)scanout.frames,
                         from_file ? "file" : "memory");
@@ -364,6 +426,12 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
             if (scenery) backdrop_shown = s.backdrop; else backdrop_shown.clear();
             fighters_shown.layers.clear();
             if (s.fighters.serial) fighters_shown = s.fighters;
+            if (widescreen && s.wide_presentation.size() == size_t(mk3::Scanout::kWideWidth) * mk3::Scanout::kFrameHeight) {
+                auto boxes = frame_boxes;   // the world's boxes move with the window
+                for (auto& box : boxes) box.x += mk5wide::kWideMargin - s.wide_shift;
+                window->Present(s.wide_presentation, mk3::Scanout::kWideWidth, mk3::Scanout::kFrameHeight, s.wide_backdrop, s.wide_fighters, boxes);
+                return;
+            }
             window->Present(shown, mk3::Scanout::kFrameWidth, mk3::Scanout::kFrameHeight, backdrop_shown, fighters_shown, frame_boxes);   // paced to the 146234-clock raster
         };
         scanout.presented = [&](const mk3::Scanout& s) {
@@ -432,7 +500,42 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
                                 (unsigned long long)frame, sec, atto, (unsigned long long)b.Cycles(),
                                 (unsigned long long)HashRgb(s.frame), (unsigned long long)HashRgb(previous_rgb),
                                 (unsigned long long)HashWords(b.o.palette));
-                    if (!state_plan.empty() || run_ahead) { std::printf(",\"pcm\":\"%016llx\"", (unsigned long long)pcm_hash); pcm_hash = 0xcbf29ce484222325ull; }
+                    if (!state_plan.empty() || run_ahead || state_hash) { std::printf(",\"pcm\":\"%016llx\"", (unsigned long long)pcm_hash); pcm_hash = 0xcbf29ce484222325ull; }
+                    if (state_hash) {
+                        uint64_t h = kFnvBasis;
+                        for (const uint16_t v : b.o.ram) h = (h ^ v) * kFnvPrime;
+                        for (const uint16_t v : b.o.vram) h = (h ^ v) * kFnvPrime;
+                        for (const uint16_t v : b.o.cmos) h = (h ^ v) * kFnvPrime;
+                        for (const uint32_t v : b.s.a) h = (h ^ v) * kFnvPrime;
+                        for (const uint32_t v : b.s.b) h = (h ^ v) * kFnvPrime;
+                        h = (h ^ b.s.status) * kFnvPrime; h = (h ^ b.s.pc) * kFnvPrime; h = (h ^ b.s.instructions) * kFnvPrime;
+                        const auto word = [&](uint32_t bit) { return int(int16_t(b.o.ram[(bit - 0x01000000) / 16])); };
+                        std::printf(",\"state\":\"%016llx\",\"game\":[%d,%d,%d,%d]", (unsigned long long)h, word(mk3::wide::kMode), word(mk3::wide::kCameraX),
+                                    word(mk3::wide::kCameraMin), word(mk3::wide::kCameraMax));
+                    }
+                    if (widescreen) {
+                        const auto& au = s.wide_audit; const auto& l = wide->layer;
+                        wide_checks.Frame(l);
+                        std::printf(",\"checks\":[%llu,%llu,%llu,%llu]", (unsigned long long)wide_checks.parallax_checked, (unsigned long long)wide_checks.parallax_differ,
+                                    (unsigned long long)wide_checks.still_checked, (unsigned long long)wide_checks.still_moved);
+                        std::printf(",\"wide\":{\"centre\":%llu,\"filled\":%llu,\"shift\":%d,\"whole\":%d,\"soft\":%d,\"audit\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu],"
+                                    "\"faults\":%llu,\"fault_pc\":%u,\"skips\":%llu,\"passes\":%llu,\"fight\":%d,\"arena\":%d,\"open\":%d,\"rgb\":\"%016llx\",\"bands\":[",
+                                    (unsigned long long)s.wide_centre, (unsigned long long)s.wide_filled, s.wide_shift, int(s.wide_whole), int(s.wide_soft),
+                                    (unsigned long long)au.shown, (unsigned long long)au.sentinel, (unsigned long long)au.masked, (unsigned long long)au.outside,
+                                    (unsigned long long)au.outside_real, (unsigned long long)au.generated, (unsigned long long)au.stale,
+                                    (unsigned long long)wide->faults, unsigned(wide->fault_pc), (unsigned long long)wide->streamer_skips,
+                                    (unsigned long long)wide->passes, int(l.fight), int(l.arena), int(l.open), (unsigned long long)HashRgb(s.wide_presentation));
+                        // Each measured scenery layer of the last build: the margin columns its art covers at the least.
+                        for (size_t k = 0; k < l.bands_done.size(); ++k) {
+                            int left = mk5wide::kWideMargin, right = mk5wide::kWideMargin;
+                            for (const auto& r : l.bands_done[k].rows) {
+                                left = std::min(left, std::max(0, mk5wide::kWideMargin - std::max<int>(r.left, 0)));
+                                right = std::min(right, std::max(0, std::min<int>(r.right, mk5wide::kLayerWidth) - (mk5wide::kWideMargin + mk5wide::kVisible)));
+                            }
+                            std::printf("%s[%u,%d,%d]", k ? "," : "", unsigned(l.bands_done[k].layer), left, right);
+                        }
+                        std::printf("]}");
+                    }
                     if (mk5hitbox::enabled) {
                         std::printf(",\"boxes\":[");
                         for (size_t i = 0; i < frame_boxes.size(); ++i)
@@ -457,7 +560,24 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
                                 std::printf("%x", (pen & 0xffff) == mk3::Scanout::kBlackPen ? 8u : unsigned(pen >> 17) & 7u);
                             }
                     }
-                    if (!composed.empty()) { std::printf("\",\"rm4x\":\""); Hex(composed); }
+                    if (!composed.empty() && !widescreen) { std::printf("\",\"rm4x\":\""); Hex(composed); }
+                    if (widescreen) { std::printf("\",\"wide\":\""); Hex(s.wide_presentation); std::printf("\",\"wide_raw\":\""); Hex(s.wide_frame); }
+                    if (widescreen && dump_4x) {
+                        const unsigned w = mk3::Scanout::kWideWidth, h = mk3::Scanout::kFrameHeight;
+                        const auto wide4x = s.wide_fighters.serial ? mk5presentation::ComposeFighterFrame4x(s.wide_fighters, w, h)
+                                          : !s.wide_backdrop.empty() ? mk5stage::Bicubic4x(s.wide_presentation, s.wide_backdrop, w, h) : std::vector<uint32_t>{};
+                        std::printf("\",\"wide4x\":\""); Hex(wide4x);
+                    }
+                    if (widescreen && wide->layer.debug) {   // the last build's staged draws as placed: list, columns, row, rows, fixed, source
+                        std::printf("\",\"draws\":\"");
+                        for (const auto& d : wide->layer.placed_done) std::printf("%d:%d:%d:%u:%u:%d:%x ", int(d.layer), int(d.lo), int(d.hi), unsigned(d.row), unsigned(d.rows), int(d.fixed), unsigned(d.source));
+                        std::printf("\",\"planes\":\"");   // per scroll slot: ratio, the arcade's span, the measured and the taken bounds
+                        for (unsigned k = 0; k < 9; ++k) { const auto& l = wide->layer;
+                            std::printf("%u:%lld/%lld:%d..%d:%d..%d:%d..%d ", k, (long long)l.ratio[k].plane, (long long)l.ratio[k].world, l.span[k][0], l.span[k][1],
+                                        l.want[k][0], l.want[k][1], l.bound[k][0], l.bound[k][1]); }
+                        std::printf("\",\"notes\":\"");
+                        for (const auto& d : wide->layer.notes_done) std::printf("%u:%d:%d:%u:%d ", unsigned(d.layer), int(d.lo), int(d.hi), unsigned(d.row), int(d.camera));
+                    }
                     std::printf("\"}\n");
                 }
             }
@@ -480,6 +600,7 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
             if ((!state_requests.empty() || ahead == 1 || ahead == 3) && !stop) return true;   // before the observers' Step: Run resumes at this instruction
             if (census_on) census.queue.Step(board.s.pc, board.s.a.data());
             if (layer2) layers->Step(board.s.pc, board.s.a.data());
+            if (widescreen) wide->Step();
             if (board.s.pc == mk5hitbox::kMk3.strike_pc) mk5hitbox::Strike(mk5hitbox::kMk3, board.s.a.data(), b.o.ram);
             if (tape_next < tape.size()) {
                 const uint64_t cycle = board.Cycles();

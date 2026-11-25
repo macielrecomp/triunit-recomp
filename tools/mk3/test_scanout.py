@@ -19,7 +19,7 @@ class Scanout(unittest.TestCase):
         cc=q.DEFAULT_CC;env={'PATH':str(cc.parent)+os.pathsep+os.environ['PATH']}
         with q.scratch_tree() as (temp,cleanup):
             exe=temp/'mk3-scanout.exe'
-            made=q.command([cc,'-std=c++17','-O2','-Wall','-Wextra','-Werror','-static','-I'+str(ROOT/'native/mk3'),
+            made=q.command([cc,'-std=c++17','-O2','-Wall','-Wextra','-Werror','-static','-I'+str(ROOT/'native/mk3'),'-I'+str(ROOT/'native/include'),
                             ROOT/'native/tests/mk3_scanout_tests.cpp','-o',exe],temp,cwd=ROOT,env=env,timeout=180)
             self.assertTrue(made['passed'],q.compact(made))
             run=q.command([exe],temp,cwd=ROOT,env=env,timeout=60)

@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 
 namespace mk3 {
 inline const std::vector<uint8_t> kNoGraphics;   // runs without the graphics ROMs: any DMA ROM read rejects
@@ -73,6 +74,11 @@ struct OpsState {
     std::array<uint16_t, 1024> shiftreg{};   // TMS34010 m_shiftreg (Ops::ShiftRegister)
     uint64_t slice_end = ~0ull;              // m_icount end of the timeslice (Ops graphics ops, Board::RunTms)
     uint64_t empty_reads = 0;   // DCS data reads on an empty output latch (each ate min(4444, m_icount) cycles)
+    // Widescreen shadow pass (mk3_wide.hpp; not state, never on at an instruction boundary of the game): while on, a
+    // main RAM store is journaled (word index, old value) and nothing else is stored, recorded or noted; a device access
+    // or an interrupt is refused (shadow_fault). The pass undoes the journal and restores the CPU itself.
+    bool shadow_on = false, shadow_fault = false;
+    std::vector<std::pair<uint32_t, uint16_t>> shadow_journal;
     OpsState(std::vector<uint16_t> cmos_words, const std::vector<uint8_t>& graphics) : cmos(std::move(cmos_words)), blitter(graphics) {}
 };
 class Ops : public OpsState {
@@ -103,7 +109,7 @@ public:
         Note(Unverified::TmsEdge, target, from, next ? 4 : 2);
     }
     void Note(Unverified kind, uint32_t id, uint32_t from, uint8_t bit) {
-        if (!first) return;
+        if (!first || shadow_on) return;
         if (noted.empty()) noted.resize(size_t(0x100000000ull - kProgramBaseBit) >> 4);
         auto& seen = noted[((kind == Unverified::TmsBlock ? id : from) - kProgramBaseBit) >> 4];
         if (!(seen & bit)) { seen |= bit; first->Note(kind, id, s.cycles, from); }
@@ -333,6 +339,7 @@ public:
     // (OpsState::shiftreg)
     void ShiftRegister(uint32_t address, bool to_vram) {
         const size_t word = address >> 3;
+        if (shadow_on) { shadow_fault = true; return; }
         if (word + shiftreg.size() > vram.size()) Reject("shift-register transfer outside VRAM", address);
         if (to_vram) {
             std::copy(shiftreg.begin(), shiftreg.end(), vram.begin() + ptrdiff_t(word));
@@ -569,6 +576,12 @@ public:
         if (address & 15) Reject("unaligned word read", address);
         if (address >= kProgramBaseBit) return program.Word(address);
         if (address >= 0x01000000 && address <= 0x013ffff0) return ram[(address - 0x01000000) / 16];
+        if (shadow_on) {   // memories only: video RAM, palette RAM, the DMA registers as they stand
+            if (address <= 0x003ffff0) { const auto offset = (address / 16) * 2; return videobank() ? uint16_t((vram[offset] & 0xff) | vram[offset + 1] << 8) : uint16_t((vram[offset] >> 8) | (vram[offset + 1] & 0xff00)); }
+            if (address >= 0x01880000 && address <= 0x018ffff0) return palette[(address - 0x01880000) / 16];
+            if ((address & ~0x00080000u) >= 0x01a00000 && (address & ~0x00080000u) <= 0x01a000f0) return blitter.Read(((address & ~0x00080000u) - 0x01a00000) / 16);
+            shadow_fault = true; return 0;
+        }
         if (address >= 0x01400000 && address <= 0x0145fff0) {
             const auto value = cmos[(address - 0x01400000) / 16]; Record(s.reads, address, value); return value;
         }
@@ -649,6 +662,11 @@ public:
     }
     void Write16(uint32_t address, uint16_t value) {
         if (address & 15) Reject("unaligned word write", address);
+        if (shadow_on) {
+            if (address >= 0x01000000 && address <= 0x013ffff0) { auto& word = ram[(address - 0x01000000) / 16]; shadow_journal.emplace_back((address - 0x01000000) / 16, word); word = value; }
+            else shadow_fault = true;
+            return;
+        }
         if (cosim && !dcs_known && (address == 0x01680000 || (address >= 0x01800000 && address <= 0x0187fff0 && IoOffset(address) == 1)))
             Reject("DCS host write past the ADSP translation frontier", address);   // before any effect of the instruction
         Record(s.writes, address, value);
@@ -736,6 +754,7 @@ public:
     // (SET_ST in POPST/PUTST/RETI, INTENB writes) the acceptance is an IrqPath {id = vector, from = instruction PC}: Strict
     // rejects it unless route-verified, Game takes it and notes its first execution.
     void CheckInterrupt(uint32_t& next, unsigned& cost, bool compared = true) {
+        if (shadow_on) return;
         const uint32_t vector = Video([&] { return video.Vector(s.status); }, 0xc0000120);
         if (!vector) return;
         if (!compared) {
@@ -762,6 +781,7 @@ public:
     void ReturnInterrupt() { const uint32_t status = Pop(); const uint32_t next = Pop() & ~15u; SetStatus(status, next, 11); }
     // TRAP n (34010ops.hxx:1895-1906): TRAP 0 pushes nothing; RESET_ST's check sees IE clear.
     void Trap(unsigned n, uint32_t next) {
+        if (shadow_on) { shadow_fault = true; Finish(next, 0); return; }
         const uint32_t status = s.status, vector = 0xffffffe0u - (n << 5), handler = Read32(vector) & ~15u;
         if (n) { Push(next); Push(status); }
         s.status = 0x10;

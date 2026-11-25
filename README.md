@@ -118,7 +118,7 @@ The digests that the generated output must reproduce are in
 | | Mortal Kombat | Mortal Kombat II | Mortal Kombat 3 |
 |---|:---:|:---:|:---:|
 | Arcade Original and Remastered editions | ✅ | ✅ | ✅ |
-| Widescreen 16:9 (Remastered) | ✅ | ✅ | 🔜 coming soon |
+| Widescreen 16:9 (Remastered) | ✅ | ✅ | ✅ |
 | Floor blood that stays (Remastered) | ✅ | ✅ | ✅ |
 | Video filters, CRT presets, TV frame, VRR, HDR10 | ✅ | ✅ | ✅ |
 | Save states, run-ahead, training mode | ✅ | ✅ | ✅ |
@@ -134,9 +134,9 @@ No emulator runs the game.
 
 ### Widescreen 16:9 (Remastered)
 
-Mortal Kombat and Mortal Kombat II can fill a 16:9 screen (*Settings > Display >
-Screen: Widescreen*, Remastered edition; off by default, which keeps the
-arcade's 4:3). Mortal Kombat 3 is next: see the [roadmap](#roadmap).
+Mortal Kombat, Mortal Kombat II and Mortal Kombat 3 can fill a 16:9 screen
+(*Settings > Display > Screen: Widescreen*, Remastered edition; off by default,
+which keeps the arcade's 4:3).
 
 - **Drawn by the game itself.** The picture gains 67 columns on each side,
   filled with what the game draws there: scenery, fighters, projectiles and
@@ -147,6 +147,8 @@ arcade's 4:3). Mortal Kombat 3 is next: see the [roadmap](#roadmap).
   picture away from an arena's ends.
 - **Full to the edges.** At an arena's end the wide picture stops with the
   arena's art, so the sides stay full; far backdrops stop at their own ends.
+  In Mortal Kombat 3 a far backdrop the size of the 4:3 screen (a skyline, a
+  sky) gets soft sides in the colours of its own edge.
 - **The sky stays the sky.** Where an arena's sky is the page's own background,
   it goes on into the sides whatever happens on screen: diagonal jumps from
   wall to wall, the life bars, a roof.
@@ -246,7 +248,7 @@ the SHA-256 that record holds. Each game has two modes:
 |---|---|---|
 | Image | Arcade image (video filters stay optional) | Video filters (scaling, CRT presets, ScaleFX, CAS, SMAA, bilateral filter) and a CRT television frame drawn in code |
 | Audio | The board's audio exactly as the arcade produces it; never reads `custom_audio/` | Optional music supplied by you (Mortal Kombat 3 Remastered changes the video only and keeps the arcade audio) |
-| Extras | — | Floor blood that stays for the whole fight (all three games); widescreen 16:9 (Mortal Kombat and Mortal Kombat II) |
+| Extras | — | Floor blood that stays for the whole fight (all three games); widescreen 16:9 (all three games) |
 | Rules, timing, voices, effects | Arcade | Same as Arcade Original |
 
 `python tools/launcher/build.py` builds the app by hand (`--if-stale` skips an
@@ -382,11 +384,10 @@ python tools/widescreen/acceptance.py
 
 | Planned | Status |
 |---------|--------|
-| **Widescreen 16:9 for Mortal Kombat 3** | Coming soon. The same method as the other two games: the sides drawn by the game itself, the game unchanged. |
 | **Linux and macOS versions** | Planned ([issue #1](https://github.com/macielrecomp/triunit-recomp/issues/1)). Today the video, input and build are Windows-only. |
 
-Already shipped, most recent first: widescreen 16:9 for Mortal Kombat and
-Mortal Kombat II, training mode, run-ahead, save states, controller and arcade
+Already shipped, most recent first: widescreen 16:9 for Mortal Kombat 3,
+widescreen 16:9 for Mortal Kombat and Mortal Kombat II, training mode, run-ahead, save states, controller and arcade
 stick remapping with SOCD, the CRT television frame, HDR10, floor blood that
 stays in all three games, RecompLauncher support.
 

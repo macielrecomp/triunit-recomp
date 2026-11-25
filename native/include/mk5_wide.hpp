@@ -226,12 +226,18 @@ struct Layer {
     // A far plane's measured band, drawn with its list's camera: where its art ends inside the shadow's clip. Only an end
     // the arcade never shows counts (the line's art reaches the arcade screen's edge at that camera limit): a narrower
     // line (an object on the plane) shows its ends on the arcade screen too, and keeps them.
+    // seen: the columns of such an end that the arcade may show at its camera limit and still have it count (MK3: a
+    // plane whose art stops short of the arcade's last screen, which shows the page's background there). The plane is
+    // then held no sooner than where the wide screen's edge meets the arcade's own last column of it (its span moved in
+    // by the margin): the wide picture shows of that end what the arcade shows at its limit, no more. With seen 0 an
+    // end that counts lies past that column anyway. The game's configuration, not state.
+    int seen=0;
     void Learn(unsigned slot,int camera,const Band& b){
         slot=std::min(slot,unsigned(want.size()-1));auto& at=want[slot];const auto [first,last]=span[slot];
         if(first>last||!fight)return;
         for(const auto& r:b.rows){
-            if(r.left>-kReach&&camera+r.left-kWideMargin<=first)at[0]=std::max(at[0],camera+r.left);
-            if(r.right<kLayerWidth+kReach&&camera+r.right-kWideMargin-kVisible>=last)at[1]=std::min(at[1],camera+r.right-kLayerWidth);
+            if(r.left>-kReach&&camera+r.left-kWideMargin<=first+seen)at[0]=std::max(at[0],std::min(camera+r.left,first+kWideMargin));
+            if(r.right<kLayerWidth+kReach&&camera+r.right-kWideMargin-kVisible>=last-seen)at[1]=std::min(at[1],std::max(camera+r.right-kLayerWidth,last-kWideMargin));
         }
     }
     // A far plane's scroll (16.16) in the shadow pass at the world camera x: the arcade's moved by its ratio times the
@@ -317,7 +323,12 @@ struct Layer {
         }
         open=lines>=kPicture;
     }
+    // edges: the policy above applies (MK1, MK2). Without it (MK3: every plane is held at the arcade's own last view of
+    // it, so what shows past a layer's end is what the arcade shows there, a farther plane or the page's background) the
+    // bands are only measured. The game's configuration, not state.
+    bool edges=true;
     void MaskBands(){
+        if(!edges){if(debug)bands_done=bands;bands.clear();return;}
         const bool art=fight||scene;
         for(const auto& b:bands)if(b.first&&!b.rows.empty()){
             const auto own=[&](size_t row,int L){return L>=0&&L<kLayerWidth&&written[row+size_t(L)]>=b.first;};   // the band's art or nearer

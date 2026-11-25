@@ -27,7 +27,7 @@ struct VideoConfig {
  // HDR: 1 when Windows has HDR on; paper white and peak in nits (0 = from Windows); highlights only in [Video.Remastered].
  int hdr=1,hdrPaper=0,hdrPeak=0,hdrHighlights=0;
  bool scalefx=false,bezel=true,highRefresh=false,smaa=false,fullscreen=true;
- bool widescreen=false; // MK1 and MK2 [Video.Remastered] only: the arena beyond the arcade's 4:3 (MK1_/MK2_WIDESCREEN), no TV frame
+ bool widescreen=false; // [Video.Remastered] only: the arena beyond the arcade's 4:3 (MK1_/MK2_/MK3_WIDESCREEN), no TV frame
 };
 // MK3 native Remastered defaults ([Video.Remastered] of the MK3 profile): BVM / 1080p (preset 4) and ScaleFX 100. The MK3
 // Original defaults are VideoConfig{}: no effect, the arcade image.

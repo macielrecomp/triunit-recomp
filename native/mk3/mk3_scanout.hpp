@@ -25,6 +25,7 @@
 #pragma once
 #include "mk3_dma_observer.hpp"
 #include "mk3_video.hpp"
+#include "../include/mk5_wide.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -60,6 +61,172 @@ struct Scanout {
     std::vector<uint8_t> row_floor = std::vector<uint8_t>(kWidth);
     static constexpr uint32_t kSceneryRgb = 0x80000000u;   // mk5stage::scenery
 
+    // Widescreen (mk3_wide.hpp, Remastered presentation): each visible line also takes its line of the 16:9 layer, the
+    // arcade's 400 columns at its centre, as pen codes resolved through the VBLANK palette like the frame. A line whose
+    // raster is not the arcade's (blanked, another tap) shows black sides.
+    // wide_source: each wide pixel's arcade column where its pen is the arcade's own at that column (the world's column
+    // with the window's offset, the HUD's without), so the Remastered layers of that column apply; kRaw where only the
+    // layer has it (margins, an offset window, a block the arcade has not drawn yet); kBlank on a blanked line.
+    static constexpr int kWideWidth = mk5wide::kLayerWidth;
+    static constexpr uint32_t kWideColour = 0x10000, kWideMasked = 0x20000, kWideSentinel = 0x30000, kWideBlank = 0x40000;   // pen codes above the palette's
+    static constexpr int16_t kRaw = -1, kBlank = -2;
+    static constexpr uint8_t kWideFresh = 32, kWideSoft = 64;   // mk3::Wide::kFresh, kSoft
+    static constexpr uint32_t kWideSoftFlag = 0x100000;        // on a pen code: a pixel past a far backdrop's end, shown soft
+    const mk5wide::Layer<uint16_t>* wide = nullptr;
+    bool wide_present = false;
+    std::function<unsigned()> wide_dim;   // the game's fade at the VBLANK, of 256 (mk3::Wide::Dim), for the colours the layer took from the ROM
+    std::vector<uint32_t> wide_pens, wide_frame;   // kWideWidth x kFrameHeight: pen codes; 0xffRRGGBB (raw colours, soft sides)
+    std::vector<int16_t> wide_source;
+    std::vector<uint16_t> wide_blood;              // the floor stain on a kRaw pixel (RGB555 | 8000h; 0: none)
+    int wide_shift_work = 0, wide_shift = 0;       // the frame's window offset: arcade column x is wide column x + 67 - shift
+    bool wide_whole_work = false, wide_whole = false, wide_soft_work = false, wide_soft = false;
+    // Diagnostics of the last presented frame: arcade-column pixels that differ from VRAM (0 when the wide camera is the
+    // arcade's), of them the ones a fresh draw filled, and the margin audit (mk5wide::Layer::debug).
+    uint64_t wide_centre_work = 0, wide_centre = 0, wide_filled_work = 0, wide_filled = 0;
+    mk5wide::Audit wide_audit_work, wide_audit;
+    std::vector<uint32_t> wide_presentation, wide_backdrop;   // 0xffRRGGBB; 0x00RRGGBB | kSceneryRgb
+    mk5presentation::FighterFrame wide_fighters;
+    // Save-state fields: the lines taken so far (a state is saved inside a frame); a state saved with widescreen and read
+    // without it is passed over, one saved without it leaves the wide frame as it stands until the next one.
+    template<class A> void WideFields(A& a) {
+        bool saved = wide != nullptr;
+        a(saved);
+        if (!saved) return;
+        if (wide) { a(wide_pens, wide_source, wide_blood, wide_shift_work, wide_whole_work, wide_soft_work, wide_centre_work, wide_filled_work); return; }
+        std::vector<uint32_t> pens_; std::vector<int16_t> source_; std::vector<uint16_t> blood_;
+        int shift_ = 0; bool whole_ = false, soft_ = false; uint64_t centre_ = 0, filled_ = 0;
+        a(pens_, source_, blood_, shift_, whole_, soft_, centre_, filled_);
+    }
+    void EnableWide(const mk5wide::Layer<uint16_t>* layer, bool present) {
+        wide = layer; wide_present = present;
+        const size_t n = size_t(kWideWidth) * kFrameHeight;
+        wide_pens.assign(n, kWideBlank); wide_source.assign(n, kBlank); wide_blood.assign(n, 0); wide_frame.assign(n, 0xff000000u);
+    }
+    void WideLine(int y, bool on, size_t row_base, unsigned col, const std::vector<uint16_t>& vram) {
+        const auto& layer = *wide;
+        const bool have = on && layer.Enabled() && (col & 0x1ff) == unsigned(mk5wide::kMargin);   // the row's low bits ride above the tap
+        const unsigned page = unsigned(row_base >> 17) & 1;
+        if (!y) {
+            wide_shift_work = have ? layer.page_shift[page] : 0; wide_whole_work = have && layer.page_whole[page];
+            wide_soft_work = have && layer.page_soft[page];
+            wide_centre_work = wide_filled_work = 0; wide_audit_work = {};
+        }
+        const int shift = wide_shift_work;
+        const size_t base = (row_base >> 9) * size_t(kWideWidth), line = size_t(y) * kWideWidth;
+        const uint16_t* row = vram.data() + row_base;
+        const uint16_t* pens = have ? layer.pens.data() + base : nullptr;
+        const uint8_t* marks = have ? layer.fixed.data() + base : nullptr;
+        const uint16_t* stains = have && !layer.blood.empty() ? layer.blood.data() + base : nullptr;
+        uint32_t* out = wide_pens.data() + line;
+        int16_t* sources = wide_source.data() + line;
+        uint16_t* bloods = wide_blood.data() + line;
+        for (int x = 0; x < kWideWidth; ++x) {
+            const int hud = x - mk5wide::kWideMargin;
+            if (!have) {   // the arcade's line between black sides
+                const bool arcade = on && hud >= 0 && hud < kFrameWidth;
+                out[x] = arcade ? uint32_t(row[(col + unsigned(hud)) & 0x1ff] & 0x7fff) : kWideBlank;
+                sources[x] = arcade ? int16_t(hud) : kBlank; bloods[x] = 0;
+                continue;
+            }
+            const uint16_t pen = pens[x];
+            const bool shown = layer.Shown(base + size_t(x));
+            const int at = !shift || (marks[x] & mk5wide::Layer<uint16_t>::kFixed) ? hud : hud + shift;
+            const bool same = at >= 0 && at < kFrameWidth && (pen & 0x7fff) == (row[(col + unsigned(at)) & 0x1ff] & 0x7fff) && !(pen & 0x8000);
+            if (hud >= 0 && hud < kFrameWidth && !wide_whole_work && (pen & 0x7fff) != (row[(col + unsigned(hud)) & 0x1ff] & 0x7fff))
+                ++(marks[x] & kWideFresh ? wide_filled_work : wide_centre_work);
+            const bool soft = shown && (marks[x] & kWideSoft) && (hud < 0 || hud >= kFrameWidth);
+            out[x] = !shown ? (layer.debug && !layer.written[base + size_t(x)] ? kWideSentinel : kWideMasked)
+                            : (pen & 0x8000 && !layer.rom_palette[page].empty() ? kWideColour | layer.rom_palette[page][pen & 0x7fff] : uint32_t(pen & 0x7fff)) |
+                              (soft ? kWideSoftFlag : 0);
+            sources[x] = same && shown && !soft ? int16_t(at) : kRaw;
+            bloods[x] = !same && shown && !soft && stains ? stains[x] : uint16_t(0);
+        }
+        if (have) layer.AuditRow(wide_audit_work, unsigned(row_base >> 9));
+    }
+    void PresentWide(const std::vector<uint16_t>& palette, const mk5blood::Shade& shade) {
+        bool soft = false;
+        unsigned dim = 0;   // 0: not measured yet
+        const auto faded = [&](unsigned c) {
+            if (!dim) dim = wide_dim ? std::max(1u, wide_dim()) : 256u;
+            return dim >= 256 ? uint16_t(c) : uint16_t(((c >> 10 & 31) * dim >> 8) << 10 | ((c >> 5 & 31) * dim >> 8) << 5 | ((c & 31) * dim >> 8));
+        };
+        for (size_t i = 0; i < wide_pens.size(); ++i) {
+            const uint32_t code = wide_pens[i] & ~kWideSoftFlag;
+            soft |= code != wide_pens[i];
+            wide_frame[i] = 0xff000000u | (code < 0x8000 ? Rgb(palette[code]) : (code & 0xf0000) == kWideColour ? Rgb(faded(code & 0x7fff)) : code == kWideSentinel ? 0xff00ffu : 0u);
+        }
+        // A far backdrop's soft sides (mk3::Wide::SoftBackdrop): per margin and line the average colour of its soft
+        // pixels (the line's last columns), blurred over kSoftRows lines up and down among the lines that have them, and
+        // dimmed from the line's innermost soft pixel (all of it) to 45% a margin's width further out.
+        if (soft) for (int side = 0; side < 2; ++side) {
+            const int first = side ? mk5wide::kWideMargin + mk5wide::kVisible : 0, last = first + mk5wide::kWideMargin;
+            std::vector<std::array<unsigned, 4>> line(size_t(kFrameHeight), std::array<unsigned, 4>{});   // r, g, b sums and count
+            std::vector<int> inner(size_t(kFrameHeight), -1);
+            for (int y = 0; y < kFrameHeight; ++y)
+                for (int x = first; x < last; ++x) if (const size_t i = size_t(y) * kWideWidth + size_t(x); wide_pens[i] & kWideSoftFlag) {
+                    const uint32_t p = wide_frame[i];
+                    line[size_t(y)][0] += p >> 16 & 255; line[size_t(y)][1] += p >> 8 & 255; line[size_t(y)][2] += p & 255; ++line[size_t(y)][3];
+                    if (side ? inner[size_t(y)] < 0 : true) inner[size_t(y)] = x;   // nearest the arcade's columns
+                }
+            for (int y = 0; y < kFrameHeight; ++y) {
+                if (!line[size_t(y)][3]) continue;
+                std::array<unsigned, 3> sum{};
+                unsigned n = 0;
+                for (int dy = -mk5wide::kSoftRows; dy <= mk5wide::kSoftRows; ++dy)
+                    if (const int at = y + dy; at >= 0 && at < kFrameHeight && line[size_t(at)][3]) {
+                        for (size_t c = 0; c < 3; ++c) sum[c] += line[size_t(at)][c] / line[size_t(at)][3];
+                        ++n;
+                    }
+                for (int x = first; x < last; ++x) if (const size_t i = size_t(y) * kWideWidth + size_t(x); wide_pens[i] & kWideSoftFlag) {
+                    const unsigned away = unsigned(std::abs(x - inner[size_t(y)])), light = 256 - 141 * std::min(away, unsigned(mk5wide::kWideMargin)) / unsigned(mk5wide::kWideMargin);
+                    wide_frame[i] = 0xff000000u | (sum[0] / n * light >> 8) << 16 | (sum[1] / n * light >> 8) << 8 | (sum[2] / n * light >> 8);
+                }
+            }
+        }
+        // A page with soft sides whose margins already hold what each arcade line ends in (the game filled it whole: a
+        // finisher's white flash, a wipe, black) is shown as it is.
+        bool filled = wide_soft_work;
+        for (int y = 0; y < kFrameHeight && filled; ++y) {
+            const uint32_t* line = wide_frame.data() + size_t(y) * kWideWidth;
+            for (int x = 0; x < mk5wide::kWideMargin && filled; ++x)
+                filled = line[x] == line[mk5wide::kWideMargin] && line[mk5wide::kWideMargin + mk5wide::kVisible + x] == line[mk5wide::kWideMargin + mk5wide::kVisible - 1];
+        }
+        if (wide_soft_work && !filled) mk5wide::SoftMargins(wide_frame.data(), unsigned(kFrameHeight), false, [&](size_t i) { wide_source[i] = kRaw; wide_blood[i] = 0; });
+        wide_shift = wide_shift_work; wide_whole = wide_whole_work; wide_soft = wide_soft_work;
+        wide_centre = wide_centre_work; wide_filled = wide_filled_work; wide_audit = wide_audit_work;
+        if (!wide_present || presentation.size() != frame.size()) return;
+        const size_t n = wide_frame.size();
+        const int move = mk5wide::kWideMargin - wide_shift;
+        const bool scenery = backdrop.size() == frame.size(), actors = fighters.serial != 0, actor_backdrop = actors && !fighters.backdrop.empty();
+        auto& f = wide_fighters;
+        wide_presentation.resize(n); wide_backdrop.resize(scenery ? n : 0);
+        f.serial = fighters.serial; f.layers.clear();
+        f.underlay.resize(actors ? n : 0); f.backdrop.resize(actor_backdrop ? n : 0); f.opaque_order.resize(actors ? n : 0); f.covered.resize(actors ? n : 0);
+        for (size_t i = 0, y = 0; y < size_t(kFrameHeight); ++y)
+            for (size_t x = 0, arcade = y * kFrameWidth; x < size_t(kWideWidth); ++x, ++i) {
+                const int source = wide_source[i];
+                if (source >= 0) {
+                    const size_t a = arcade + size_t(source);
+                    wide_presentation[i] = 0xff000000u | presentation[a];
+                    if (scenery) wide_backdrop[i] = backdrop[a];
+                    if (actors) {
+                        f.underlay[i] = fighters.underlay[a]; f.opaque_order[i] = fighters.opaque_order[a]; f.covered[i] = fighters.covered[a];
+                        if (actor_backdrop) f.backdrop[i] = fighters.backdrop[a];
+                    }
+                    continue;
+                }
+                const uint32_t raw = wide_frame[i];
+                const uint32_t stain = wide_blood[i] ? 0xff000000u | Rgb(mk5blood::Dim(uint16_t(wide_blood[i] & 0x7fff), shade.now, shade.then)) : 0;
+                const uint32_t shown = stain ? stain : raw, back = source == kRaw && !stain ? (raw & 0xffffff) | kSceneryRgb : 0;
+                wide_presentation[i] = shown;
+                if (scenery) wide_backdrop[i] = back;
+                if (actors) {
+                    f.underlay[i] = shown & 0xffffff; f.opaque_order[i] = UINT64_MAX; f.covered[i] = 0;
+                    if (actor_backdrop) f.backdrop[i] = back;
+                }
+            }
+        if (actors) for (auto layer : fighters.layers) { layer.x += move; f.layers.push_back(std::move(layer)); }   // the fighters are world
+    }
     void ResetPartial() { last_partial_scan = 0; }   // scanline-0 timer: reset_partial_updates
 
     // update_partial(vcount) with the TMS registers and video RAM at that instant.
@@ -117,6 +284,7 @@ struct Scanout {
             fighter_work.Line(layers->fighters, unsigned(top - kTop), row_base, row_col, row_pens.data(), row_back.data(),
                               [](uint16_t pen) { return uint32_t(pen); }, enabled && heblnk == kLeft && hsblnk == kRight + 1);
         }
+        if (wide) WideLine(top - kTop, enabled && heblnk == kLeft && hsblnk == kRight + 1, row_base, row_col, vram);
     }
 
     // vblank_begin -> frame_update: the visible area through the palette (xRGB_555, pal5bit expansion).
@@ -126,11 +294,12 @@ struct Scanout {
                 const uint16_t pen = pens[size_t(y + kTop) * kWidth + size_t(x + kLeft)];
                 frame[size_t(y) * kFrameWidth + x] = pen == kBlackPen ? 0 : Rgb(palette[pen]);
             }
+        mk5blood::Shade shade;
         if (layers) {
             if (backdrop_pens.empty()) backdrop_pens.assign(pens.size(), kBlackPen);
             if (presentation_pens.empty()) presentation_pens.assign(frame.size(), kBlackPen);
             if (presentation_floor.empty()) { presentation_floor_pen.assign(frame.size(), 0); presentation_floor.assign(frame.size(), 0); }
-            mk5blood::Shade shade;   // this frame's stains: their floor pens through the VBLANK palette and then
+            // this frame's stains: their floor pens through the VBLANK palette and then
             for (size_t i = 0; i < frame.size(); ++i)
                 if (presentation_pens[i] & FloorBlood::kMark) shade.Cover(presentation_floor_pen[i], presentation_floor[i], palette.data());
             const auto rgb = [&](uint32_t pen) {
@@ -152,6 +321,7 @@ struct Scanout {
                 for (auto& l : fighters.layers) for (auto& v : l.pixels) if (v >> 24) v = 0xff000000u | rgb(v);
             }
         }
+        if (wide) PresentWide(palette, shade);
         ++frames;
         if (presented) presented(*this);
     }

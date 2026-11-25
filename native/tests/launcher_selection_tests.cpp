@@ -46,14 +46,14 @@ void videoMatrix(App& app,int game){
   app.key('3');
   cycleVideo(app,250,&VideoConfig::sync,{1,2,0});
   cycleVideo(app,251,&VideoConfig::highRefresh,{false,true});
-  if(app.widescreenAvailable()){   // MK1 and native MK2, Remastered profile: SCREEN cycles TV FRAME, 4:3, WIDESCREEN
+  if(app.widescreenAvailable()){   // MK1, native MK2 and MK3, Remastered profile: SCREEN cycles TV FRAME, 4:3, WIDESCREEN
    const auto actions=app.actions();app.focus=int(std::find(actions.begin(),actions.end(),209)-actions.begin());
    for(auto [bezel,wide]:{std::pair{true,false},{false,false},{false,true}}){
     verify(app.video().bezel==bezel&&app.video().widescreen==wide,"SCREEN must cycle TV FRAME, 4:3 and WIDESCREEN");app.key(VK_RETURN);}
    verify(app.video().bezel&&!app.video().widescreen,"SCREEN must wrap to the TV frame");
   }else{
    cycleVideo(app,209,&VideoConfig::bezel,{true,false});
-   verify(!app.video().widescreen,"widescreen stays off outside the MK1 and native MK2 Remastered profiles");
+   verify(!app.video().widescreen,"widescreen stays off outside the Remastered profiles");
   }
   cycleVideo(app,videoFullscreen,&VideoConfig::fullscreen,{true,false});
   app.act(displayPage);

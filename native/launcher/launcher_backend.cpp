@@ -242,7 +242,7 @@ std::vector<wchar_t> nativeEnvironment(const mklauncher::Config& c,const VideoCo
  std::map<std::wstring,std::wstring,EnvironmentLess> values;auto* original=GetEnvironmentStringsW();if(!original)throw std::runtime_error("native process environment");
  for(const auto* cursor=original;*cursor;cursor+=wcslen(cursor)+1){
   const std::wstring row=cursor;const auto eq=row.find(L'=',row[0]==L'='?1:0);
-  if(eq!=std::wstring::npos&&_wcsnicmp(row.c_str(),L"MK1_",4)!=0&&_wcsnicmp(row.c_str(),L"MK2_WIDESCREEN=",15)!=0)values[row.substr(0,eq)]=row.substr(eq+1);
+  if(eq!=std::wstring::npos&&_wcsnicmp(row.c_str(),L"MK1_",4)!=0&&_wcsnicmp(row.c_str(),L"MK2_WIDESCREEN=",15)!=0&&_wcsnicmp(row.c_str(),L"MK3_WIDESCREEN=",15)!=0)values[row.substr(0,eq)]=row.substr(eq+1);
  }FreeEnvironmentStringsW(original);
  const auto& preset=mk5video::presets[size_t(v.scanlines)];
  values[L"MK1_SCANLINES"]=preset.scanlines;values[L"MK1_CRT_PRESET"]=preset.crt;
@@ -262,7 +262,7 @@ std::vector<wchar_t> nativeEnvironment(const mklauncher::Config& c,const VideoCo
  {const auto text=mk5controls::format(controls);values[L"MK1_CONTROLS"]=std::wstring(text.begin(),text.end());}
  values[L"MK1_AUDIO_LATENCY"]=c.audioLatency==2?L"safe":L"balanced";values[L"MK1_MUSIC_MODE"]=c.remastered?L"remastered":L"original";values[L"MK1_GRAPHICS_VALIDATE"]=validateGraphics?L"1":L"0";
  if(c.remastered)values[L"MK1_MUSIC_DIRECTORY"]=music.wstring();
- if(widescreen)values[widescreen]=L"1";   // MK1_WIDESCREEN or MK2_WIDESCREEN: the game's Remastered launch only
+ if(widescreen)values[widescreen]=L"1";   // MK1_WIDESCREEN, MK2_WIDESCREEN or MK3_WIDESCREEN: the game's Remastered launch only
  std::vector<wchar_t> block;for(const auto& value:values){const auto row=value.first+L"="+value.second;block.insert(block.end(),row.begin(),row.end());block.push_back(0);}block.push_back(0);return block;
 }
 std::wstring nativeError(const char* error){
@@ -778,7 +778,7 @@ bool Backend::launchMk3(){
  try{
   const auto spec=mk3Spec(root_,true);const bool remastered=mk3Engine_==2;auto selected=config;validate(selected,2);
   // The edition's video profile (presentation only: the canonical state is the same in both), game volume and audio queue.
-  auto environment=nativeEnvironment(selected,selected.video(remastered),{},true,false,customBezel(root_,2),loadControls());auto expectedPath=spec.executable;expectedPath.make_preferred();
+  auto environment=nativeEnvironment(selected,selected.video(remastered),{},true,false,customBezel(root_,2),loadControls(),remastered&&selected.video(remastered).widescreen?L"MK3_WIDESCREEN":nullptr);auto expectedPath=spec.executable;expectedPath.make_preferred();
   fs::create_directories(spec.profile);unlinked(spec.profile);
   const auto log=root_/coreLogs(2)/L"launcher-latest.log";unlinked(log);fs::create_directories(log.parent_path());unlinked(log);
   SECURITY_ATTRIBUTES security{sizeof(security),nullptr,TRUE};Handle output,input;

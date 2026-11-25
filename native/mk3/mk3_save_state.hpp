@@ -5,11 +5,12 @@
 // configuration stay bound to the live session, so a load restores state inside the same machine.
 #include "mk3_board.hpp"
 #include "mk3_dma_observer.hpp"
+#include "mk3_wide.hpp"
 #include "../mk2/mk2_state_io.hpp"
 #include "mk5_program.hpp"
 
 namespace mk3 {
-inline constexpr uint32_t kSaveStateVersion = 3;   // 2: the Remastered floor blood; 3: its floor pens (fades)
+inline constexpr uint32_t kSaveStateVersion = 4;   // 2: the Remastered floor blood; 3: its floor pens (fades); 4: widescreen
 inline constexpr const char* kSaveStateRevision = "mk3 2.1";
 inline constexpr const char* kSaveStateMagic = "TRIUNIT-MK3-STATE";
 static_assert(mk2::state::kBlock<Board::As> && mk2::state::kBlock<VideoTiming::Atto>, "128-bit times are copied as blocks");
@@ -37,6 +38,7 @@ template<class A> void Fields(A& a, DacBlock& d) { a(d.ns, d.boot, d.cycle, d.ad
 template<class A> void Fields(A& a, Scanout& s) {
     a(s.pens, s.frame, s.last_partial_scan, s.frames, s.lines, s.fighter_work, s.fighters, s.backdrop_pens, s.backdrop,
       s.presentation_pens, s.presentation_floor_pen, s.presentation_floor, s.presentation);
+    s.WideFields(a);
 }
 template<class A> void Fields(A& a, DmaSource& s) { a(s.producer, s.list, s.scroll, s.routine, s.object, s.appender, s.bound); }
 template<class A> void Fields(A& a, DmaQueue& q) { a(q.list, q.scroll, q.routine, q.direct, q.staged, q.appended); }
@@ -68,9 +70,16 @@ inline mk2::state::Reader CheckLiveState(const Program& program, const std::vect
     if (header.payload != Sha256(std::vector<uint8_t>(reader.at, reader.end))) throw std::invalid_argument("MK3 save state payload is damaged");
     return reader;
 }
-template<class A, class... Host> void Session(A& a, Board& b, Scanout& scanout, DmaLayers* layers, Host&... host) {
+// The widescreen layer (mk3_wide.hpp) is state when the session has it: a session without it passes over a file's, and
+// one with it starts over from VRAM when the file has none (a state saved without widescreen).
+template<class A, class... Host> void Session(A& a, Board& b, Scanout& scanout, DmaLayers* layers, Wide* wide, Host&... host) {
     a(b, scanout);
     if (layers) a(*layers);
+    bool saved = wide != nullptr;
+    a(saved);
+    if (saved && wide) a(*wide);
+    else if (saved) { Wide passed; a(passed); }
+    else if (wide) { if constexpr (A::reading) wide->Restart(); }
     a(host...);
 }
 inline void RequireBoundary(const Board& b) {
@@ -80,10 +89,10 @@ inline void RequireBoundary(const Board& b) {
 
 // Only after `stop` ended Board::Run; the next Run resumes the restored timeslice.
 template<class... Host> std::vector<uint8_t> SaveLiveState(const Program& program, Board& b, Scanout& scanout,
-                                                         DmaLayers* layers, Host&... host) {
+                                                         DmaLayers* layers, Wide* wide, Host&... host) {
     state::RequireBoundary(b);
     mk2::state::Writer payload;   // the writer only reads its operands
-    state::Session(payload, b, scanout, layers, host...);
+    state::Session(payload, b, scanout, layers, wide, host...);
     state::Header header{kSaveStateMagic, program.sha256, kSaveStateRevision, state::Edition(layers), Sha256(payload.bytes), kSaveStateVersion};
     mk2::state::Writer out;
     out(header);
@@ -92,10 +101,10 @@ template<class... Host> std::vector<uint8_t> SaveLiveState(const Program& progra
 }
 // Call CheckLiveState first to refuse a file without side effects; a failure here leaves partial state and is fatal.
 template<class... Host> void LoadLiveState(const Program& program, const std::vector<uint8_t>& bytes, Board& b, Scanout& scanout,
-                                           DmaLayers* layers, Host&... host) {
+                                           DmaLayers* layers, Wide* wide, Host&... host) {
     auto reader = state::CheckLiveState(program, bytes, state::Edition(layers));
     state::RequireBoundary(b);
-    state::Session(reader, b, scanout, layers, host...);
+    state::Session(reader, b, scanout, layers, wide, host...);
     if (reader.at != reader.end) throw std::runtime_error("MK3 save state has trailing data");
     state::RequireBoundary(b);
 }

@@ -1,19 +1,20 @@
-"""Widescreen 16:9 acceptance, MK1 and MK2, in one command: python tools/widescreen/acceptance.py [--game mk1|mk2] [--all]
+"""Widescreen 16:9 acceptance, MK1, MK2 and MK3, in one command: python tools/widescreen/acceptance.py [--game mk1|mk2|mk3] [--all]
 
 Each legal replay runs twice in the Remastered edition, without and with the widescreen shadow pass (its diagnostics on,
 TRIUNIT_WIDE_DEBUG), and checks:
   1. the game state is identical in every frame (MK1: CPU, cycles, RAM, VRAM, palette per frame; MK2: VRAM and palette per
-     frame, CPU and RAM at the replay's end) and so are the shown frames, PCM and CMOS;
+     frame, CPU and RAM at the replay's end; MK3: CPU, cycles, RAM, VRAM, CMOS, palette and PCM per frame) and so are the
+     shown frames, PCM and CMOS;
   2. the wide frame's 400 centre columns are the arcade frame bit for bit in every frame whose wide camera is the
      arcade's, before any CRT filter (a frame with an offset window or a held far plane is counted apart); in MK1 two
-     kinds of pixel are counted apart too: a scenery block the arcade has not drawn yet at its edge columns (filled) and,
-     on a screen with soft sides, a line's black end where the soft side starts (joined);
+     kinds of pixel are counted apart too: a scenery block the arcade has not drawn yet at its edge columns (filled; MK3
+     counts it too) and, on a screen with soft sides, a line's black end where the soft side starts (joined);
   3. no fight frame shows a margin pixel no draw wrote (the sentinel); masked pixels (edge policy) are counted;
   4. every margin pixel belongs to a draw of the game meant to cover that column (no wrap, copy, mirror or invented pixel);
   5. each scenery layer moves by the same columns per frame in the margins as in the centre;
-  6. MK1: with the camera still, every scenery list's camera is still;
-  7. MK1: no fight frame with a lit picture masks more than a speck of its margins (a black bar or block over a sky);
-all of it for MK1 and MK2 (--all adds the long replays that visit every arena).
+  6. MK1 and MK3: with the camera still, every scenery list's camera is still;
+  7. MK1 and MK3: no fight frame with a lit picture masks more than a speck of its margins (a black bar or block over a sky);
+all of it for MK1, MK2 and MK3 (--all adds the long replays that visit every arena).
 It prints the edge coverage table (per arena and scenery layer: the fewest margin columns its art covered) and exits 1 on
 any failure. Needs the authenticated ROMs and the setup's generated code; nothing is written outside a temporary tree."""
 import argparse,json,os,sys
@@ -60,13 +61,16 @@ def mk1(all_tapes):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--game',choices=('mk1','mk2'));parser.add_argument('--all',action='store_true')
+    parser.add_argument('--game',choices=('mk1','mk2','mk3'));parser.add_argument('--all',action='store_true')
     args=parser.parse_args()
     failures=[]
     if args.game in (None,'mk1'):failures+=mk1(args.all)
     if args.game in (None,'mk2'):
         from tools.widescreen import mk2_acceptance
         failures+=mk2_acceptance.run(args.all,table)
+    if args.game in (None,'mk3'):
+        from tools.widescreen import mk3_acceptance
+        failures+=mk3_acceptance.run(args.all,table)
     for f in failures:print('FAIL',f)
     print('widescreen acceptance:','FAIL' if failures else 'PASS')
     return 1 if failures else 0
