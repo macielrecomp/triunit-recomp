@@ -32,13 +32,13 @@ int wmain(int argc,wchar_t** argv){try{
         for(int i=0;i<3;++i)need(!b.setupFinished(i)&&!b.available(i),"game offered before its setup finished");
         const auto record=scratch/L"generated/mk3"/std::wstring(64,L'a');fs::create_directories(record);
         {std::ofstream(record/L"mk3.exe")<<"fixture";}
-        {std::ofstream(record/L"setup.json")<<"{\"game\":\"mk3\",\"setup_version\":\"13\",\"compile\":{\"executable\":\"generated/mk3/"+std::string(64,'a')+"/mk3.exe\",\"sha256\":\""+std::string(64,'b')+"\"}}";}
+        {std::ofstream(record/L"setup.json")<<"{\"game\":\"mk3\",\"setup_version\":\"14\",\"compile\":{\"executable\":\"generated/mk3/"+std::string(64,'a')+"/mk3.exe\",\"sha256\":\""+std::string(64,'b')+"\"}}";}
         need(b.setupFinished(2)&&!b.setupFinished(1),"finished setup record not recognized");
         need(!b.available(2),"setup record alone must not stand in for the game package");
         // A build of an older release (another or no setup_version) asks for a new build.
-        {std::ofstream(record/L"setup.json")<<"{\"game\":\"mk3\",\"setup_version\":\"12\",\"compile\":{\"executable\":\"generated/mk3/"+std::string(64,'a')+"/mk3.exe\",\"sha256\":\""+std::string(64,'b')+"\"}}";}
+        {std::ofstream(record/L"setup.json")<<"{\"game\":\"mk3\",\"setup_version\":\"13\",\"compile\":{\"executable\":\"generated/mk3/"+std::string(64,'a')+"/mk3.exe\",\"sha256\":\""+std::string(64,'b')+"\"}}";}
         need(!b.setupFinished(2)&&readSetup(scratch,L"mk3").outdated,"setup record of an older release offered as built");
-        {std::ofstream(record/L"setup.json")<<"{\"setup_version\":\"13\",\"compile\":{\"executable\":\"../../x.exe\",\"sha256\":\""+std::string(64,'b')+"\"}}";}
+        {std::ofstream(record/L"setup.json")<<"{\"setup_version\":\"14\",\"compile\":{\"executable\":\"../../x.exe\",\"sha256\":\""+std::string(64,'b')+"\"}}";}
         need(!b.setupFinished(2),"setup record outside its folder accepted");
     }
     if(argc>=4&&std::wstring(argv[3])==L"render"){

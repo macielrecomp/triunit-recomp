@@ -116,7 +116,7 @@ int wmain(int argc,wchar_t** argv){try {
   mklauncher::Backend publicNative(root);require(publicNative.selectGame(1),"native selection/settings");
   require(!publicNative.available(1),"public native package offered before its setup finished");
   const auto record=root/L"generated/mk2"/std::wstring(64,L'c');fs::create_directories(record);fs::copy_file(executable,record/L"mk2-native.exe");
-  write(record/L"setup.json","{\"game\":\"mk2\",\"setup_version\":\"13\",\"compile\":{\"executable\":\"generated/mk2/"+std::string(64,'c')+"/mk2-native.exe\",\"sha256\":\""+Sha256(bytes(executable))+"\"}}");
+  write(record/L"setup.json","{\"game\":\"mk2\",\"setup_version\":\"14\",\"compile\":{\"executable\":\"generated/mk2/"+std::string(64,'c')+"/mk2-native.exe\",\"sha256\":\""+Sha256(bytes(executable))+"\"}}");
   require(publicNative.available(1),"verified native package unavailable in public collection");
   playable["runtime_sources_sha256"]="f33c2fe77c0ccc6a90cec0178db4a8d794754ed4672fbc9a11c6c4cfdfbefd67";
   publish();require(publicNative.available(1),"published video runtime must stay available");

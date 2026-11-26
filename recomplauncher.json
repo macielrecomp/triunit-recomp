@@ -15,7 +15,7 @@
     "args": ["--prepare", "--roms", "{game}"],
     "label": "Checking your ROM files, then generating and compiling each game on this PC",
     "timeout": 3600,
-    "version": "13",
+    "version": "14",
     "options": [
       {
         "id": "own_roms",
