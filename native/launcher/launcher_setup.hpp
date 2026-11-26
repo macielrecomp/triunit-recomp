@@ -8,7 +8,7 @@
 #include <vector>
 namespace mklauncher {
 // tools/setup/setup.py SETUP_VERSION: a record of another version was built by an older release and must be built again.
-inline constexpr const char* kSetupVersion="12";
+inline constexpr const char* kSetupVersion="13";
 struct SetupRecord {
  bool finished=false;
  bool outdated=false; // built by another setup version: not offered until it is built again

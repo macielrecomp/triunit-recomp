@@ -43,7 +43,7 @@ int wmain(int argc,wchar_t** argv){
   // The launcher offers a game only after its local setup finished (generated/<game>/<sha>/setup.json).
   for(const char* game:{"mk1","mk2"}){
    const auto folder=root/L"generated"/fs::u8path(game)/std::wstring(64,L'd');fs::create_directories(folder);write(folder/L"game.exe","x");
-   write(folder/L"setup.json",std::string("{\"setup_version\":\"12\",\"compile\":{\"executable\":\"generated/")+game+"/"+std::string(64,'d')+"/game.exe\",\"sha256\":\""+std::string(64,'e')+"\"}}");
+   write(folder/L"setup.json",std::string("{\"setup_version\":\"13\",\"compile\":{\"executable\":\"generated/")+game+"/"+std::string(64,'d')+"/game.exe\",\"sha256\":\""+std::string(64,'e')+"\"}}");
   }
   mklauncher::Backend backend(root);check(backend.selectGame(1),"select MK2");check(backend.launch(),"launch MK2");
   const auto identity=root/mk2/L"product/engine-path.txt";fs::remove(identity);

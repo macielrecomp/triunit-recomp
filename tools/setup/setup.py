@@ -30,7 +30,7 @@ ACCEPTED=ROOT/'tools/acceptance/generated.json'
 VALIDATED_CC='16.1.0'   # g++ version that validated the routes (docs/PUBLISHING.md)
 # Raised when a release changes what the setup builds: older records then ask for a new build (launcher_setup.hpp
 # kSetupVersion, recomplauncher.json prepare.version).
-SETUP_VERSION='12'
+SETUP_VERSION='13'
 MIN_PYTHON=(3,12)       # Path.is_junction (link guards of the setup, the package writers and temporary_tree)
 STEPS=('verify','stage','decoder','generate','accept','compile','seed','install')
 PROGRESS=dict(file=None,started=0.0,state={},lock=threading.Lock())   # lock: the two compile workers report units
