@@ -1098,12 +1098,12 @@ struct App {
                 row(208,710,L"BRIGHTNESS",L"100% uses the original output gain.",std::to_wstring(v.brightness)+L"%");
             }
         }else if(category==1){
-            // D7: the MK3 Remastered edition has no remastered music.
-            if(selected==2)row(245,350,L"AUDIO OF THIS GAME",L"Remastered: remastered video, original arcade audio.",L"ORIGINAL ARCADE",false);
+            // D7: the MK3 Remastered edition has no remastered music; since 26/11/2026 it masters the arcade's own sound in stereo.
+            if(selected==2)row(245,350,L"AUDIO OF THIS GAME",L"Remastered: the arcade's own sound, mastered in stereo.",L"ORIGINAL ARCADE",false);
             else row(245,350,L"DEFAULT GAME VERSION",L"Choose and SAVE to always start in this version.",draft.remastered?L"REMASTERED":L"ORIGINAL ARCADE",musicAvailable||draft.remastered);
-            row(205,420,L"AUDIO QUEUE",selected==2?L"Balanced: 80 ms in both editions. Safe: 140 ms.":L"Balanced: Original 80 ms / Remastered 140 ms. Safe: 140 ms.",std::array<std::wstring,3>{L"LOW / 40 ms",L"BALANCED",L"SAFE / 140 ms"}[size_t(draft.audioLatency)]);
+            row(205,420,L"AUDIO QUEUE",L"Balanced: 60 ms, longer after an audio dropout. Safe: 140 ms.",std::array<std::wstring,3>{L"LOW / 40 ms",L"BALANCED",L"SAFE / 140 ms"}[size_t(draft.audioLatency)]);
             row(243,490,L"ARCADE VOICES AND EFFECTS",L"Voices, hits and effects preserved in both versions.",L"ORIGINAL",false);
-            row(244,560,L"AUDIO RESERVE",L"Margin against system delays; no sample is dropped.",draft.remastered||draft.audioLatency==2?L"140 ms":L"80 ms",false);
+            row(244,560,L"AUDIO RESERVE",L"Margin against system delays; no sample is dropped.",draft.audioLatency==2?L"140 ms":L"60 ms",false);
             g.text(L"The Windows volume still controls the game output.",306+shift,653,13,muted,.2f);
         }else if(category==2){
             const auto& v=video();

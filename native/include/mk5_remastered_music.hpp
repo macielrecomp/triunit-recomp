@@ -22,7 +22,10 @@ class RemasteredMusic {
 public:
  explicit RemasteredMusic(const std::filesystem::path& directory);
  void Command(uint16_t value);
- std::array<int16_t,2> Render(int16_t original,float effects);
+ // True while a user track replaces the board's music: the caller then passes the board without its music.
+ bool Replaces()const{return active>=0;}
+ // The board's stereo master, plus the user's track when one replaces the music.
+ std::array<int16_t,2> Render(std::array<float,2> board);
  unsigned ActiveCommand()const;
  std::string CommandsJson()const;
  unsigned LoadedSlots()const{return loaded;}

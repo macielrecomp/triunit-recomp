@@ -138,7 +138,7 @@ def main():
         if quality.sha(batch_reference.MAME)!=batch_reference.MAME_SHA:raise ValueError('MAME executable identity differs')
         with quality.scratch_tree() as (scratch,cleanup):
             result['cleanup']=cleanup
-            inputs=[*run.SOURCES,*run.HEADERS,'native/tests/mk2_dac_boot_tests.cpp','native/audio/williams_resampler.hpp','native/mk2/mk2_audio.hpp',
+            inputs=[*run.SOURCES,*run.HEADERS,'native/tests/mk2_dac_boot_tests.cpp','native/audio/williams_resampler.hpp','native/audio/sinc_resampler.hpp','native/audio/studio_master.hpp','native/mk2/mk2_audio.hpp',
                     'tools/mk2/dac_reference.py','tools/mk2/native.py']
             before={name:quality.sha(__import__('tools.setup.mk2',fromlist=['source']).source(name)) for name in inputs}
             native.prepare_reference_roms(run.ROOT/'roms/mk2',scratch/'mk2',run.read_manifest())

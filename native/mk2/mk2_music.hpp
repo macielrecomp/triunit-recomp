@@ -2,6 +2,7 @@
 #include "mk2_adsp.hpp"
 #include "mk2_audio.hpp"
 #include "../audio/host_gain.hpp"
+#include "../audio/studio_master.hpp"
 #include <filesystem>
 
 namespace mk2 {
@@ -15,10 +16,15 @@ public:
     static constexpr float original_gain=5.27837207f; // +14.45 dB
     std::array<int16_t,2> Render(float original,std::array<int16_t,2> music,float music_gain=.25f,
                                  std::array<double,2> release={}) {
-        if(!std::isfinite(original) || !std::isfinite(music_gain) || music_gain<0 ||
+        return Render(std::array<float,2>{original,original},music,music_gain,release);
+    }
+    // The board's sound already mastered to stereo (mk5audio::StudioMaster).
+    std::array<int16_t,2> Render(std::array<float,2> original,std::array<int16_t,2> music,float music_gain=.25f,
+                                 std::array<double,2> release={}) {
+        if(!std::isfinite(original[0]) || !std::isfinite(original[1]) || !std::isfinite(music_gain) || music_gain<0 ||
            !std::isfinite(release[0]) || !std::isfinite(release[1]))throw std::invalid_argument("MK2 mix is not finite");
-        const double base=double(original)*32768.0*original_gain;
-        return host_.Render<2>({base+music[0]*double(music_gain)+release[0],base+music[1]*double(music_gain)+release[1]});
+        const double scale=32768.0*original_gain;
+        return host_.Render<2>({original[0]*scale+music[0]*double(music_gain)+release[0],original[1]*scale+music[1]*double(music_gain)+release[1]});
     }
     uint64_t Limited()const{return host_.Limited();}
     uint64_t Clipped()const{return host_.Clipped();}

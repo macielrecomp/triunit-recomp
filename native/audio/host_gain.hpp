@@ -11,7 +11,9 @@ namespace mk5audio {
 // volume knob). Emulated PCM, clocks and game state never see it. Values (dB) match the integrated loudness of the
 // first fight with music to L3 = -23.62 LUFS (build/native/mk3-product/audio-measure.json, F5).
 namespace master_db {
-constexpr double mk1_original=0.27,mk1_remastered=1.81,mk2_original=15.92,mk2_remastered=1.52;
+// Remastered since 26/11/2026 (studio master): the loudness of three music renders per game matched to the Original's
+// (build/native/audio-audition/scripts/game_render.py, BS.1770); effects and voices were not part of that measure.
+constexpr double mk1_original=0.27,mk1_remastered=-0.45,mk2_original=15.92,mk2_remastered=0.31;
 }
 
 // Gain plus safety limiter (D3: it must not act on any reference route; it guards sound no route played).

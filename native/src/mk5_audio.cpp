@@ -2,6 +2,8 @@
 #include "mk5_audio_internal.hpp"
 #include "mk5_program.hpp"
 #include "williams_resampler.hpp"
+#include "sinc_resampler.hpp"
+#include "studio_master.hpp"
 #include "mk5_audio_time.hpp"
 #include "mk5_remastered_music.hpp"
 #include "../mk2/mk2_state_io.hpp"
@@ -14,7 +16,11 @@ struct WilliamsAudio::Impl: ymfm::ymfm_interface {
  std::vector<uint8_t> u3;WilliamsSamples samples;Oki6295 oki;PresentationYm2151 ym;
  std::unique_ptr<RemasteredMusic> remastered;
  std::vector<int16_t> presentation_pcm;
- WilliamsResampler effects_fm_left{3579545/64},effects_fm_right{3579545/64},effects_dac{48000*32};
+ // Remastered presentation: band-limited reconstruction of the FM and DAC, whole (clean_*) and without the music
+ // (effects_*), then the studio master. The ADPCM voices keep the reference kernel until they are auditioned on their
+ // own: band-limited at 3.6 kHz they sounded darker to the user. The canonical PCM below keeps the reference kernel.
+ SincResampler clean_fm{3579545/64},clean_dac{48000*32},effects_fm{3579545/64},effects_dac{48000*32};
+ StudioMaster studio{StudioSettings::Mk1()};
  bool dac_music=false;
  std::vector<AudioEvent> events;std::vector<AudioCommand> commands;std::vector<int16_t> pcm;
  uint8_t bank=0,latch=0,talkback=0,dac=0;bool irq=false,firq=false,reset=false,frontier=false,reset_vector_pending=true;
@@ -63,9 +69,9 @@ struct WilliamsAudio::Impl: ymfm::ymfm_interface {
  bool ymfm_is_busy()override{return shared?clock_time(chip_cycle)<shared_busy_end:!busy_end.Due(chip_cycle);}
  void ymfm_update_irq(bool asserted)override{firq=asserted;}
  void source_samples(){
-  while(fm_stream.Written()*2000000<=chip_cycle*(3579545/64)){ymfm::ym2151::output_data data;ym.generate(&data);fm_sample=data.data[0]+data.data[1];fm_stream.Push(float(data.data[0]));fm_right_stream.Push(float(data.data[1]));if(remastered){ymfm::ym2151::output_data fx;ym.CurrentOutput(fx,ram[0x21a]);effects_fm_left.Push(float(fx.data[0]));effects_fm_right.Push(float(fx.data[1]));}}
+  while(fm_stream.Written()*2000000<=chip_cycle*(3579545/64)){ymfm::ym2151::output_data data;ym.generate(&data);fm_sample=data.data[0]+data.data[1];fm_stream.Push(float(data.data[0]));fm_right_stream.Push(float(data.data[1]));if(remastered){ymfm::ym2151::output_data fx;ym.CurrentOutput(fx,ram[0x21a]);clean_fm.Push(float(data.data[0]+data.data[1]));effects_fm.Push(float(fx.data[0]+fx.data[1]));}}
   while(oki_stream.Written()*2000000<=chip_cycle*(1000000/132)){oki_sample=oki.StepSamples(1)[0];oki_stream.Push(float(oki_sample)/2);}
-  while(dac_stream.Written()*2000000<=chip_cycle*(48000*32)){dac_stream.Push(float(int32_t(dac)*256-32768));if(remastered)effects_dac.Push(float(dac_music?0:int32_t(dac)*256-32768));}
+  while(dac_stream.Written()*2000000<=chip_cycle*(48000*32)){dac_stream.Push(float(int32_t(dac)*256-32768));if(remastered){clean_dac.Push(float(int32_t(dac)*256-32768));effects_dac.Push(float(dac_music?0:int32_t(dac)*256-32768));}}
  }
  void chips(uint64_t until){
   if(!chip_cycle){source_samples();if(!output_samples){pcm.push_back(0);if(remastered){presentation_pcm.push_back(0);presentation_pcm.push_back(0);}++output_samples;}}
@@ -77,7 +83,12 @@ struct WilliamsAudio::Impl: ymfm::ymfm_interface {
    pcm_phase+=48000;
    if(pcm_phase>=2000000){pcm_phase-=2000000;float value=fm_stream.Sample(output_samples)*.10f;value+=fm_right_stream.Sample(output_samples)*.10f;value+=dac_stream.Sample(output_samples)*.10f;value+=oki_stream.Sample(output_samples)*.15f;
     const auto original=int16_t(std::clamp(int32_t(value),-32768,32767));
-    if(remastered){float fx=effects_fm_left.Sample(output_samples)*.10f;fx+=effects_fm_right.Sample(output_samples)*.10f;fx+=effects_dac.Sample(output_samples)*.10f;fx+=oki_stream.Sample(output_samples)*.15f;const auto stereo=remastered->Render(original,fx);presentation_pcm.insert(presentation_pcm.end(),stereo.begin(),stereo.end());}
+    if(remastered){const float voices=oki_stream.Sample(output_samples)*.15f;
+     // Under the user's music only the effects are mastered; otherwise the whole board.
+     const float board=remastered->Replaces()?effects_fm.Sample(output_samples)*.10f+effects_dac.Sample(output_samples)*.10f+voices
+                                             :clean_fm.Sample(output_samples)*.10f+clean_dac.Sample(output_samples)*.10f+voices;
+     const auto master=studio.Process(board/32768);
+     const auto stereo=remastered->Render({master[0]*32768,master[1]*32768});presentation_pcm.insert(presentation_pcm.end(),stereo.begin(),stereo.end());}
     ++output_samples;pcm.push_back(original);}
   }
  }
@@ -311,7 +322,7 @@ template<class A> void Fields(A& a,AudioEvent& e){a(e.cycle,e.pc,e.address,e.val
 template<class A> void Fields(A& a,AudioCommand& c){a(c.requested_quanta,c.effective_cycle,c.value);}
 template<class A> void Fields(A& a,YmTime& t){a(t.cycle,t.fraction);}
 template<class A,class Impl> static void AudioFields(A& a,Impl& s){
- a(s.c,s.ram,s.hidden,s.samples,s.oki,s.presentation_pcm,s.effects_fm_left,s.effects_fm_right,s.effects_dac,s.dac_music,
+ a(s.c,s.ram,s.hidden,s.samples,s.oki,s.presentation_pcm,s.clean_fm,s.clean_dac,s.effects_fm,s.effects_dac,s.studio,s.dac_music,
    s.events,s.commands,s.pcm,s.bank,s.latch,s.talkback,s.dac,s.irq,s.firq,s.reset,s.frontier,s.reset_vector_pending,
    s.source_pc,s.requested,s.chip_cycle,s.pcm_phase,s.bus_cycle,s.output_samples,s.fm_stream,s.fm_right_stream,s.oki_stream,
    s.dac_stream,s.timers,s.timer_origin,s.busy_end,s.fm_sample,s.oki_sample,s.completed_accesses,s.access_count,

@@ -97,7 +97,7 @@ VERIFIERS += ['native/mk2/mk2_audio.hpp','native/tests/mk2_dac_timeline_tests.cp
               'tools/mk2/dac_reference/logmacro.h','tools/mk2/test_dac_timeline.py',
               'tools/mk2/test_dac_reference.py','tools/mk2/test_audio.py',
               'tools/mk2/test_native_settings.py','tools/mk2/test_batch_cli.py',
-              'native/audio/williams_resampler.hpp','native/include/mk5_audio_output.hpp',
+              'native/audio/williams_resampler.hpp','native/audio/sinc_resampler.hpp','native/audio/studio_master.hpp','native/include/mk5_audio_output.hpp',
               'native/src/mk5_audio_output.cpp','native/include/mk5_audio_volume.hpp','native/mk2/mk2_native_check.cpp','tools/mk2/native.py']
 VERIFIERS += ['tools/mk2/test_continuation.py','tools/mk2/test_native_continuation.py',
               'tools/mk2/continuation_audio_reference.py',

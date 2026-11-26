@@ -451,7 +451,7 @@ def run(rom_directory,window=False,reference_frames=False,settings=None,audio=Fa
         "native/include/mk5_timing.hpp","native/include/mk5_gamepad.hpp","native/include/mk5_controls.hpp","native/include/mk5_training.hpp","native/include/mk5_hitbox.hpp","native/include/mk5_hid.hpp",
         "native/include/mk5_machine.hpp","native/include/mk5_irq.hpp",
         "native/include/mk5_audio_link.hpp","tools/mk2/native.py","tools/mk2/batch_reference.py",
-        "native/mk2/mk2_audio.hpp","native/mk2/mk2_music.hpp","native/runtime/mk2_music_manifest.hpp","native/audio/williams_resampler.hpp","native/audio/host_gain.hpp","native/audio/custom_audio.hpp","native/audio/tiny_json.hpp","native/include/mk5_audio_output.hpp","native/include/mk5_audio_volume.hpp",
+        "native/mk2/mk2_audio.hpp","native/mk2/mk2_music.hpp","native/runtime/mk2_music_manifest.hpp","native/audio/williams_resampler.hpp","native/audio/sinc_resampler.hpp","native/audio/studio_master.hpp","native/audio/host_gain.hpp","native/audio/custom_audio.hpp","native/audio/tiny_json.hpp","native/include/mk5_audio_output.hpp","native/include/mk5_audio_volume.hpp",
         "tools/mk2/reference.py","tools/quality/run.py","tools/mk2/roms-l31.json",
         "tools/mk2/first_fight_path.json","tools/mk2/profile.py","tools/mk2/valid_cmos_startup_path.json",
         "tools/mk2/valid_cmos_draw_path.json"]+__import__('tools.setup.mk2',fromlist=['units']).units()))

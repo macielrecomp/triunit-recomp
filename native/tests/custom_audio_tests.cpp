@@ -66,20 +66,21 @@ int main(int argc,char** argv){try{
     {
         mk5audio::RemasteredMusic none(root/"absent");
         none.Command(0x100|19);
-        const auto out=none.Render(1234,0.f);
-        need(none.LoadedSlots()==0&&out[0]==1234&&out[1]==1234&&none.Starts()==0&&none.ActiveCommand()==0,"MK1 empty folder must keep the original music");
+        const auto out=none.Render({1234.f,-77.f});
+        need(none.LoadedSlots()==0&&!none.Replaces()&&out[0]==1234&&out[1]==-77&&none.Starts()==0&&none.ActiveCommand()==0,"MK1 empty folder must keep the board's master");
         const auto mk1=root/"mk1";fs::create_directories(mk1);
         write(mk1/"music-01.wav",wav(2,48000,16,3));   // selector 19, plays once
         write(mk1/"music-02.wav",truncated);            // selector 20, corrupt
         write(mk1/"music-03.wav",wav(1,48000,16,2));    // selector 1, loops
         mk5audio::RemasteredMusic m(mk1);
         need(m.LoadedSlots()==2,"MK1 partial folder slots differ");
-        m.Command(0x100|20);need(m.Render(777,0.f)==std::array<int16_t,2>{777,777}&&m.ActiveCommand()==0,"MK1 corrupt slot must keep the original music");
+        m.Command(0x100|20);need(!m.Replaces()&&m.Render({777.f,777.f})==std::array<int16_t,2>{777,777}&&m.ActiveCommand()==0,"MK1 corrupt slot must keep the original music");
         m.Command(0x100|19);
-        const auto first=m.Render(500,100.f);
-        need(m.ActiveCommand()==19&&first[0]==int16_t(int32_t(100.f-300*.125f))&&first[1]==int16_t(int32_t(100.f-293*.125f)),"MK1 slot music or effects mix differs");
-        m.Render(0,0.f);m.Render(0,0.f);need(m.Finishes()==1&&m.Render(0,5.f)==std::array<int16_t,2>{5,5},"MK1 one-shot slot must end in silence over effects");
-        m.Command(0x100|1);for(int n=0;n<5;++n)m.Render(0,0.f);need(m.Loops()==2,"MK1 looping slot must repeat");
+        need(m.Replaces(),"MK1 loaded slot must replace the board's music");
+        const auto first=m.Render({100.f,40.f});
+        need(m.ActiveCommand()==19&&first[0]==int16_t(int32_t(100.f-300*.125f))&&first[1]==int16_t(int32_t(40.f-293*.125f)),"MK1 slot music or effects mix differs");
+        m.Render({0.f,0.f});m.Render({0.f,0.f});need(m.Finishes()==1&&m.Render({5.f,5.f})==std::array<int16_t,2>{5,5},"MK1 one-shot slot must end in silence over effects");
+        m.Command(0x100|1);for(int n=0;n<5;++n)m.Render({0.f,0.f});need(m.Loops()==2,"MK1 looping slot must repeat");
         m.Command(0x100|0x21);need(m.ActiveCommand()==1,"MK1 effect command interrupted the music");
         m.Command(0x100|0x05);need(m.ActiveCommand()==0,"MK1 unmapped music selector must return to the board's music");
     }

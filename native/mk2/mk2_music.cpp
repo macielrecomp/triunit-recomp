@@ -117,7 +117,9 @@ struct RemasteredAudio::Impl {
     DcsEffects effects;
     std::vector<std::optional<customaudio::Track>> tracks;
     std::vector<float> original_pcm,effects_pcm,gain_pcm;
-    DcsFloatAudio original,effect_audio,gain_audio;
+    DcsCleanAudio original,effect_audio;
+    DcsFloatAudio gain_audio;   // an envelope, not sound: the reference kernel does not ring on its steps
+    mk5audio::StudioMaster studio{mk5audio::StudioSettings::Mk2()};   // the board's whole mix, or its effects under the user's music
     RemasteredMix mix;
     mk5audio::AudioConsumer consumer;
     std::array<uint64_t,32768> tags{};
@@ -180,7 +182,9 @@ void RemasteredAudio::Feed(uint64_t first,const float* samples,size_t count){
     if(s.original_pcm.size()!=s.effects_pcm.size() || s.original_pcm.size()!=s.gain_pcm.size())throw std::runtime_error("remastered DCS output phases differ");
     std::array<int16_t,2048> out{};
     for(size_t n=0;n<s.original_pcm.size();++n){
-        const auto raw=s.tags[(s.output*31250/48000)%s.tags.size()];
+        // The sound at this output sample left the DSP kCleanDelay source samples before the newest one.
+        const uint64_t source=s.output*31250/48000;
+        const auto raw=source<kCleanDelay?0:s.tags[(source-kCleanDelay)%s.tags.size()];
         const auto* track=s.Track(raw);
         const auto tag=track?raw:0;
         if(tag!=s.last_tag){
@@ -208,7 +212,7 @@ void RemasteredAudio::Feed(uint64_t first,const float* samples,size_t count){
             // The full DCS signal can still carry the old music in its overlap buffer.
             if(!tag)original+=(s.effects_pcm[n]-original)*weight;
         }
-        const auto stereo=s.mix.Render(original,music,s.music_gain,release);
+        const auto stereo=s.mix.Render(s.studio.Process(original),music,s.music_gain,release);
         std::copy(stereo.begin(),stereo.end(),out.begin()+n*2);
         ++s.position;++s.output;
     }
@@ -216,7 +220,7 @@ void RemasteredAudio::Feed(uint64_t first,const float* samples,size_t count){
 }
 const std::string& RemasteredAudio::MusicFingerprint()const{return impl_->fingerprint;}
 template<class A,class Impl> static void RemasteredFields(A& a,Impl& s){
-    a(s.effects,s.original,s.effect_audio,s.gain_audio,s.mix,s.tags,s.last_tag,s.position,s.starts,s.output,
+    a(s.effects,s.original,s.effect_audio,s.gain_audio,s.studio,s.mix,s.tags,s.last_tag,s.position,s.starts,s.output,
       s.cue_gain,s.music_gain,s.release_gain,s.release_position,s.release_remaining);
     // The release tail points into the reloaded tracks: stored as its slot index.
     int64_t release=-1;

@@ -12,6 +12,7 @@
 #include "mk2_valid_cmos_startup.hpp"
 #include "mk2_valid_cmos_draw.hpp"
 #include "mk5_window.hpp"
+#include "mk5_audio_link.hpp"
 #include "mk5_hitbox.hpp"
 #include "mk5_program.hpp"
 #include "mk5_profile_presentation.hpp"
@@ -125,9 +126,11 @@ int wmain(int argc, wchar_t** argv) { mk2::ReplayCapture replay;try {
             if(!directory || !*directory)throw std::runtime_error("MK2 remastered music directory missing");
             music=std::make_unique<mk2::RemasteredAudio>(machine->dsp,std::filesystem::path(directory),[&](const int16_t*p,size_t n){if(!speculating)sink->Push(p,n);});
         }
-        // Shorter driver buffers reduce completion waits on the guest thread.
-        const auto packet=remastered?mk5audio::WaveOutPacket::Ms20:mk5audio::WaveOutPacket::Ms10;
-        sink=std::make_unique<mk5audio::WaveOutSink>(remastered?2:1,packet);
+        // 10 ms packets: shorter completion waits on the guest thread, and the 60 ms reserve underruns with 20 ms ones
+        // (audio_latency_probe).
+        sink=std::make_unique<mk5audio::WaveOutSink>(remastered?2:1,mk5audio::WaveOutPacket::Ms10);
+        // The frame pacer holds the queue at its reserve (mk5_timing.hpp) instead of rebasing late frames, which drains it.
+        mk5audio::detail::hooks.output_clock=true;
         if(!remastered)audio=std::make_unique<mk2::OriginalAudio>([&](const int16_t* samples,size_t count) {if(!speculating)sink->Push(samples,count);});
         machine->dsp.SetDacObserver([&](uint64_t first,const float* samples,size_t count) {if(music)music->Feed(first,samples,count);else audio->Feed(first,samples,count);});
     }

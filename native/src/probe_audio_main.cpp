@@ -60,7 +60,8 @@ int wmain(int argc,wchar_t**argv){try{
  const char* mode=std::getenv("MK1_MUSIC_MODE");const bool remastered=mode&&std::string(mode)=="remastered";
  if(mode&&std::string(mode)!="original"&&!remastered)throw std::runtime_error("MK1_MUSIC_MODE must be original or remastered");
  if(remastered){const char* directory=std::getenv("MK1_MUSIC_DIRECTORY");if(!directory||!*directory)throw std::runtime_error("remastered music directory missing");audio.EnableRemasteredMusic(std::filesystem::u8path(directory));}
- mk5audio::WaveOutSink output(remastered?2:1);mk5audio::GameAudioScope scope(audio);
+ // 10 ms packets: the 60 ms reserve underruns with 20 ms ones (audio_latency_probe).
+ mk5audio::WaveOutSink output(remastered?2:1,mk5audio::WaveOutPacket::Ms10);mk5audio::GameAudioScope scope(audio);
  PcmDiagnostics pcm_diagnostics;
  // D5: master gain after the mix, before the user volume (WaveOutSink); the canonical PCM above is unchanged.
  mk5audio::HostGain host_gain(remastered?mk5audio::master_db::mk1_remastered:mk5audio::master_db::mk1_original);std::vector<int16_t> gained;

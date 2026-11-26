@@ -21,8 +21,9 @@ from tools.quality import run as q
 from tools.launcher_backend_build import arguments
 from tools.mk3 import preview,preview_install
 
-# D7 (14/11/2026): the MK3 Settings say that the Remastered edition keeps the arcade audio.
-D7='L"AUDIO OF THIS GAME",L"Remastered: remastered video, original arcade audio."'
+# D7 (14/11/2026): the MK3 Settings say that the Remastered edition keeps the arcade audio. Since 26/11/2026 (audio
+# studio master, approved by the user by ear) it is the arcade's own sound mastered in stereo; still no replaced music.
+D7='L"AUDIO OF THIS GAME",L"Remastered: the arcade\'s own sound, mastered in stereo."'
 LIBS=('d3d12','dxgi','d3dcompiler','dxguid','windowscodecs','ole32','uuid','gdi32','user32','shell32','xinput9_1_0')
 
 

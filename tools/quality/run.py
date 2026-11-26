@@ -421,6 +421,8 @@ def fast(cc, sanitizer, scratch, graphics=False):
         ("audio-lifetime", ["native/tests/mk5_audio_lifetime_tests.cpp"], [], []),
         ("game-volume", ["native/tests/mk5_game_volume_tests.cpp"], [], []),
         ("host-gain", ["native/tests/host_gain_tests.cpp"], [], []),
+        ("sinc-resampler", ["native/tests/sinc_resampler_tests.cpp"], [], []),
+        ("studio-master", ["native/tests/studio_master_tests.cpp"], [], []),
         ("mk2-video", ["native/tests/mk2_video_tests.cpp"], [], []),
         ("mk2-music", ["native/tests/mk2_music_tests.cpp","native/mk2/mk2_music.cpp","native/mk2/mk2_adsp.cpp",
                        "native/mk2/mk2_dcs.cpp","native/src/mk5_program.cpp"], ["-lbcrypt"], [str(scratch / "mk2-music")]),

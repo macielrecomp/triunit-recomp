@@ -47,7 +47,9 @@
 #include "mk3_host.hpp"
 #include "mk2_audio.hpp"
 #include "../audio/host_gain.hpp"
+#include "../audio/studio_master.hpp"
 #include "../launcher/launcher_legal.hpp"
+#include "mk5_audio_link.hpp"
 #include "mk5_audio_output.hpp"
 #include "mk5_window.hpp"
 #include "mk5_hitbox.hpp"
@@ -325,19 +327,37 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
             mk3host::SetTitle(GameTitle() + (remastered ? L"Remasterizada" : L"Original"));
         }
         std::unique_ptr<mk5audio::WaveOutSink> sink;
-        if (audio_on) sink = std::make_unique<mk5audio::WaveOutSink>(1, mk5audio::WaveOutPacket::Ms10);
+        if (audio_on) sink = std::make_unique<mk5audio::WaveOutSink>(remastered ? 2 : 1, mk5audio::WaveOutPacket::Ms10);
+        // The frame pacer holds the queue at its reserve (mk5_timing.hpp) instead of rebasing late frames, which drains it.
+        if (sink) mk5audio::detail::hooks.output_clock = true;
         uint64_t output_samples = 0, output_nonzero = 0;
         // D5: host gain on the unity DCS output, then the int16 the sink plays; the canonical DCS PCM is unchanged.
-        mk5audio::HostGain host_gain(mk3host::kMasterDb);
+        const double master_db = remastered ? mk3host::kRemasteredMasterDb : mk3host::kMasterDb;
+        mk5audio::HostGain host_gain(master_db);
         uint64_t pcm_hash = 0xcbf29ce484222325ull;   // --state-test: the host PCM since the last hashed frame
-        mk2::DcsFloatAudio audio([&](const float* f, size_t n) {
-            int16_t s[1024];
-            for (size_t k = 0; k < n; ++k) s[k] = host_gain.Render<1>({double(f[k]) * 32768.0})[0];
-            for (size_t k = 0; k < n; ++k) pcm_hash = (pcm_hash ^ uint16_t(s[k])) * 0x100000001b3ull;
+        // Remastered: the board's mix through the studio master, in stereo (the user's approval of 26/11/2026).
+        mk5audio::StudioMaster studio(mk5audio::StudioSettings::Mk3());
+        const auto play = [&](const float* f, size_t n) {
+            int16_t s[2048];
+            const size_t count = remastered ? 2 * n : n;
+            for (size_t k = 0; k < n; ++k) {
+                if (remastered) {
+                    const auto master = studio.Process(f[k]);
+                    const auto out = host_gain.Render<2>({double(master[0]) * 32768.0, double(master[1]) * 32768.0});
+                    s[2 * k] = out[0]; s[2 * k + 1] = out[1];
+                    output_nonzero += out[0] != 0 || out[1] != 0;
+                } else {
+                    s[k] = host_gain.Render<1>({double(f[k]) * 32768.0})[0];
+                    output_nonzero += s[k] != 0;
+                }
+            }
+            for (size_t k = 0; k < count; ++k) pcm_hash = (pcm_hash ^ uint16_t(s[k])) * 0x100000001b3ull;
             output_samples += n;
-            for (size_t k = 0; k < n; ++k) output_nonzero += s[k] != 0;
-            if (sink) sink->Push(s, n);
-        });
+            if (sink) sink->Push(s, count);
+        };
+        // The Arcade Original keeps the reference kernel; Remastered plays the same DCS samples through the band-limited one.
+        mk2::DcsFloatAudio audio(play);
+        mk2::DcsCleanAudio clean(play);
         std::set<uint32_t> sample_ns;
         size_t consumed = 0, blocks_seen = 0;
         uint64_t source_nonzero = 0, trimmed_samples = 0, input_changes = 0, dcs_commands = 0, watch_cycle = 0;
@@ -366,7 +386,8 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
         const auto slot_path = std::filesystem::path(L"saves/mk3") / program.sha256 / (remastered ? L"slot1-remastered.state" : L"slot1.state");
         // Host fields of the state: the stream into the sink, its PCM cursor, the hash and tape cursors.
         const auto host_state = [&](auto&& apply) {
-            return apply(audio, host_gain, consumed, blocks_seen, sample_ns, dcs_high, previous_pens, tape_next);
+            return remastered ? apply(clean, studio, host_gain, consumed, blocks_seen, sample_ns, dcs_high, previous_pens, tape_next)
+                              : apply(audio, host_gain, consumed, blocks_seen, sample_ns, dcs_high, previous_pens, tape_next);
         };
         mk3::DmaLayers* state_layers = layer2 ? layers.get() : nullptr;
         // Run-ahead (F6): each real frame is held; the frame after it, run from a snapshot at the next instruction
@@ -457,7 +478,8 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
                     source_nonzero += v != 0;
                     block[n] = float(v) * (1.0f / 32767.0f);
                 }
-                audio.Feed(audio.SourceSamples(), block, n);
+                if (remastered) clean.Feed(clean.SourceSamples(), block, n);
+                else audio.Feed(audio.SourceSamples(), block, n);
                 consumed += n;
             }
             // Observation histories only (bus/IRQ/ADSP logs); nothing in the emulation reads them back.
@@ -672,7 +694,7 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
                     (unsigned long long)output_samples, (unsigned long long)output_nonzero);
         bool first = true;
         for (const auto v : sample_ns) { std::printf("%s%u", first ? "" : ",", v); first = false; }
-        std::printf("],\"host_gain_db\":%.2f,\"host_limited\":%llu,\"host_clipped\":%llu,\"device\":%s", mk3host::kMasterDb,
+        std::printf("],\"host_gain_db\":%.2f,\"host_limited\":%llu,\"host_clipped\":%llu,\"device\":%s", master_db,
                     (unsigned long long)host_gain.Limited(), (unsigned long long)host_gain.Clipped(), sink ? "true" : "false");
         if (sink) std::printf(",\"submitted\":%llu,\"completed\":%llu,\"underruns\":%llu,\"queue_ms\":%u,\"max_producer_gap_ms\":%llu",
                               (unsigned long long)sink->Submitted(), (unsigned long long)sink->Completed(), (unsigned long long)sink->Underruns(),

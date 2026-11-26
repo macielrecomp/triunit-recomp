@@ -41,12 +41,12 @@ void RemasteredMusic::Command(uint16_t value){
 }
 unsigned RemasteredMusic::ActiveCommand()const{return active<0?0:remastered_slots[size_t(active)].command;}
 std::string RemasteredMusic::CommandsJson()const{std::ostringstream s;s<<'{';bool comma=false;for(size_t i=0;i<commands.size();++i)if(commands[i]){if(comma)s<<',';s<<'"'<<i<<"\":"<<commands[i];comma=true;}s<<'}';return s.str();}
-std::array<int16_t,2> RemasteredMusic::Render(int16_t original,float effects){
- if(active<0)return {original,original};
+std::array<int16_t,2> RemasteredMusic::Render(std::array<float,2> board){
+ if(active<0)return {int16_t(std::clamp(int32_t(board[0]),-32768,32767)),int16_t(std::clamp(int32_t(board[1]),-32768,32767))};
  const auto& t=tracks[size_t(active)];std::array<int16_t,2> out{};
  const bool playing=position<limit;
  // Fixed presentation gain provides room for original effects; the user's file itself is not normalized.
- for(unsigned c=0;c<2;++c){const auto v=int32_t(effects+(playing?float(t.pcm[size_t(position)*2+c])*t.gain:0.f));clipped+=v<-32768||v>32767;out[c]=int16_t(std::clamp(v,-32768,32767));}
+ for(unsigned c=0;c<2;++c){const auto v=int32_t(board[c]+(playing?float(t.pcm[size_t(position)*2+c])*t.gain:0.f));clipped+=v<-32768||v>32767;out[c]=int16_t(std::clamp(v,-32768,32767));}
  ++rendered;
  if(playing&&++position==limit){if(t.loop){position=t.repeat_begin;limit=t.repeat_end;++loops;}else ++finishes;}
  return out;

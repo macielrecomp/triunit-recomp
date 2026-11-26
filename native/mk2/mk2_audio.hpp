@@ -1,5 +1,6 @@
 #pragma once
 #include "../audio/williams_resampler.hpp"
+#include "../audio/sinc_resampler.hpp"
 #include "mk5_audio_output.hpp"
 #include <algorithm>
 #include <cmath>
@@ -7,8 +8,8 @@
 #include <type_traits>
 
 namespace mk2 {
-template<class Sample> class DcsAudioStream {
-    mk5audio::WilliamsResampler resampler_{31250};
+template<class Sample,class Resampler=mk5audio::WilliamsResampler> class DcsAudioStream {
+    Resampler resampler_{31250};
     std::function<void(const Sample*,size_t)> consumer_;
     uint64_t output_samples_=0;
     // Save-state fields; the consumer stays with the live session so Feed continues after a load.
@@ -40,4 +41,7 @@ public:
 };
 using DcsAudio=DcsAudioStream<int16_t>;
 using DcsFloatAudio=DcsAudioStream<float>;
+// Remastered presentation: the same DCS samples through the band-limited kernel; its output trails by kCleanDelay source samples.
+using DcsCleanAudio=DcsAudioStream<float,mk5audio::SincResampler>;
+inline const uint32_t kCleanDelay=mk5audio::SincResampler(31250).Delay();
 }

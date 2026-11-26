@@ -30,7 +30,7 @@ def verify(through='next-wait'):
         if quality.sha(batch_reference.MAME)!=batch_reference.MAME_SHA:raise ValueError('MAME identity differs')
         paths=list(dict.fromkeys(run.SOURCES+run.HEADERS+run.VERIFIERS+[
             'native/tests/mk2_continuation_audio_tests.cpp','native/mk2/mk2_audio.hpp',
-            'native/audio/williams_resampler.hpp','tools/mk2/native.py',
+            'native/audio/williams_resampler.hpp','native/audio/sinc_resampler.hpp','native/audio/studio_master.hpp','tools/mk2/native.py',
             'tools/mk2/dac_reference.py','tools/mk2/continuation_audio_reference.py']))
         before={name:quality.sha(__import__('tools.setup.mk2',fromlist=['source']).source(name)) for name in paths}
         with quality.scratch_tree() as (scratch,cleanup):

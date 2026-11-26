@@ -22,6 +22,9 @@ namespace mk3host {
 // conversion and the user volume. +16.6 dB lifts the loudest of the 108 verified routes (r2e11, -18.60 dBTP at unity)
 // to -2.0 dBTP, 1 dB under D3 (build/native/mk3-product/audio-measure.json).
 constexpr double kMasterDb = 16.6;
+// Remastered since 26/11/2026: the same DCS output through mk5audio::StudioMaster, whose equalizer, stereo side and
+// room change the level; this gain is set so that its loudness matches the Original's (see docs/DISPLAY_INPUT_SETUP.md).
+constexpr double kRemasteredMasterDb = 15.6;   // -0.97 dB against the Original on 30 s of the fight route
 struct Ports { uint16_t in0 = 0xffff, in1 = 0xffff, in2 = 0xffff; };
 struct Pad { uint16_t buttons = 0; uint8_t left_trigger = 0, right_trigger = 0; int16_t lx = 0, ly = 0; };   // XINPUT_GAMEPAD
 Ports Map(const std::array<bool, 256>& keys, const Pad* p1, const Pad* p2);   // keys: virtual-key state; pad nullptr: absent
