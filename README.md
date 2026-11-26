@@ -222,7 +222,14 @@ layer: the game's state, rules and timing do not change.
 ### Audio
 
 - The board's own sound program, recompiled like the game.
-- Adjustable audio queue (balanced or safe) and per-game software volume.
+- Adjustable audio queue and per-game software volume. Balanced holds 60 ms
+  of sound ahead and returns to the longer reserve for the rest of the session
+  after an audio dropout; safe holds 140 ms.
+- Remastered masters the board's own sound in stereo: band-limited
+  reconstruction, the treble above the sound board's band rebuilt from the
+  band below it, equalizer, stereo width, a short room and light bus
+  compression. Nothing is replaced: it is the sound your ROM produces.
+  Arcade Original keeps the reference kernel, in mono.
 - In Mortal Kombat and Mortal Kombat II, Remastered can play
   [your own music](#your-own-music-custom_audio); a missing slot falls back to
   the arcade's music.
@@ -254,7 +261,7 @@ the SHA-256 that record holds. Each game has two modes:
 | | Arcade Original | Remastered |
 |---|---|---|
 | Image | Arcade image (video filters stay optional) | Video filters (scaling, CRT presets, ScaleFX, CAS, SMAA, bilateral filter) and a CRT television frame drawn in code |
-| Audio | The board's audio exactly as the arcade produces it; never reads `custom_audio/` | Optional music supplied by you (Mortal Kombat 3 Remastered changes the video only and keeps the arcade audio) |
+| Audio | The board's audio exactly as the arcade produces it; never reads `custom_audio/` | The board's own sound mastered in stereo (rebuilt treble, equalizer, width, short room); optional music supplied by you in Mortal Kombat and Mortal Kombat II |
 | Extras | — | Floor blood that stays for the whole fight (all three games); widescreen 16:9 (all three games) |
 | Rules, timing, voices, effects | Arcade | Same as Arcade Original |
 

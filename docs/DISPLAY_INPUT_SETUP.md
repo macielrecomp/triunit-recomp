@@ -78,13 +78,61 @@ O produtor não espera GPU/Present. A swapchain tem fila máxima de um quadro e
 um objeto waitable; o renderer adquire o slot antes de escolher o quadro mais
 recente da caixa postal. Não acelera o jogo para recuperar atrasos do host.
 
-AUDIO oferece reservas de 80 e 140 ms, com capacidades máximas de 100 e
-160 ms. A equilibrada (80 ms) é o padrão e a menor reserva estável medida.
+AUDIO oferece a fila equilibrada (padrão) e a segura (140 ms, capacidade
+160 ms). A reserva é a latência: a sonda `native/tests/audio_latency_probe.cpp`
+mediu, do Push até a mixagem do Windows (loopback), reserva + 4 a 10 ms. Desde
+26/11/2026 a equilibrada liga com a reserva anterior (80 ms, ou 140 ms no
+estéreo Remasterizado de MK1/MK2) e, após 5 s de som, passa a ter 60 ms como
+alvo, com pacotes de 10 ms nos três jogos; o regulador de cadência pelo nível
+da fila (`mk5_timing.hpp`, agora também em MK2 e MK3) escoa o excedente sem
+descartar amostras. Um underrun mantém ou devolve a reserva anterior até o fim
+da sessão. Os 5 s cobrem a partida do DCS do MK3, que entrega o primeiro som
+62 ms atrasado aos 3,0 s (amostra 144480): com 60 ms desde o início havia um
+underrun nesse ponto em toda sessão. Medição desta máquina com a sonda
+(produtor sintético, dispositivo real, um quadro 15 ms atrasado a cada 3 s):
+mediana de 51 ms com 60 ms contra 84 ms (80 ms) e 146 ms (140 ms), sem
+underrun; com pacotes de 20 ms os mesmos 60 ms tiveram underrun.
 O modo diagnóstico `low` de 40 ms apresentou um underrun e pior regularidade
 no ensaio final: fica fora do SETTINGS e não está qualificado para uso normal.
 O recibo `check-game.json` preserva explicitamente esse resultado reprovado.
 O PCM fornecido à fila é preservado integralmente, inclusive a cauda parcial.
-Não há DSP, resampling novo nem alteração do produtor de áudio das ROMs.
+O produtor de áudio das ROMs não muda. Desde 26/11/2026 a Remasterizada
+reconstrói cada fonte a 48 kHz com sinc janelado (`native/audio/sinc_resampler.hpp`);
+a Original mantém o núcleo de referência. Medição com
+`native/tests/resampler_response_probe.cpp`: o núcleo de referência perde 1,6 dB
+em 10 kHz e 6,3 dB em 15 kHz no DCS (3,8 e 12,7 dB no YM2151) e deixa imagens
+a -18 dBc em 10 kHz; o sinc fica em 0,00 dB até 13 kHz no DCS e 20 kHz no
+YM2151, com resíduo abaixo de -96 dBc. Na escuta de 26/11/2026 o usuário achou
+essa reconstrução sozinha mais escura e pior que a Original.
+
+### Masterização da Remasterizada (26/11/2026)
+
+A Remasterizada passa a mixagem mono da placa, já a 48 kHz, por
+`native/audio/studio_master.hpp` e sai em estéreo. A receita ("estúdio amplo")
+foi escolhida pelo usuário ouvindo arquivos de comparação gerados das próprias
+ROMs; métrica não substitui essa escuta. Etapas: gate espectral contra o piso
+do DCS e replicação da banda acima do fim da banda do fluxo (só DCS, uma STFT
+de 512 pontos, 10,7 ms de atraso), low shelf em 95 Hz, high shelf em 2,6 kHz,
+-1 dB em 330 Hz, alargamento mid/side por ruído velvet acima de 250 Hz
+(esquerdo + direito continua igual ao mono), sala curta por convolução
+particionada (RT60 0,45 s, -15 dB) e compressor de barramento 2:1 relativo ao
+nível do programa.
+
+Medições nas ROMs do usuário: a música do DCS do MK2 termina em 9,35 kHz e a do
+MK3 em 11,3 kHz; o DCS sai perto de -40 dBFS RMS (cerca de 11 bits), com piso
+por amostra de -99,0 dB (MK2) e -93,3 dB (MK3). No MK1 a FM já chega a 20 kHz:
+sem gate nem replicação; FM e DAC pelo sinc, vozes ADPCM pelo núcleo de
+referência até terem a sua própria rodada de escuta. No MK3 a cadeia vale para
+a mixagem inteira (ainda sem separação de música).
+
+As cópias de banda são deslocadas em múltiplos de 4 bins (quadro/salto): outro
+deslocamento gira a fase entre quadros sobrepostos e as cópias se cancelam
+(medido: -8 dB na primeira cópia, nada na terceira). Com isso a saída do jogo
+ficou a até 2 dB do protótipo aprovado em todas as bandas, nos sete trechos
+(`build/native/audio-audition/scripts/game_render.py`). Os ganhos mestres da
+Remasterizada foram reajustados para igualar a sonoridade BS.1770 da Original
+nesses trechos de música (MK1 -0,45 dB, MK2 +0,31 dB, MK3 +15,6 dB); vozes e
+golpes não entraram nessa medida. Saves: MK1 17, MK2 21, MK3 7.
 
 Os recibos medem intervalos de submissão e chamadas Present, não o scanout
 físico nem input-to-photon. O sistema inclui Windows, driver e monitor, que
