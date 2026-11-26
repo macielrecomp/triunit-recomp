@@ -21,7 +21,7 @@ bool clean(std::wstring s){
 }
 constexpr const char* keys[]={"MK1_CRT_PRESET","MK1_SCANLINES","MK1_FILTER","MK1_SCALEFX","MK1_SCALE_MODE","MK1_CAS","MK1_BILATERAL",
  "MK1_SMAA","MK1_SYNC","MK1_COLOR","MK1_BRIGHTNESS","MK1_BEZEL","MK1_HIGH_REFRESH","MK1_FULLSCREEN","MK1_GAME_VOLUME",
- "MK1_AUDIO_LATENCY","MK1_MUSIC_MODE","MK1_MUSIC_DIRECTORY","MK1_GRAPHICS_VALIDATE","MK1_STRAY"};
+ "MK1_AUDIO_LATENCY","MK1_MUSIC_MODE","MK1_MUSIC_DIRECTORY","MK1_GRAPHICS_VALIDATE","MK1_STRAY","MK3_WIDESCREEN"};
 int probe(int argc,wchar_t** argv){
  for(int i=1;i+1<argc;++i)if(std::wstring(argv[i])==L"--edition")std::cout<<"edition="<<(std::wstring(argv[i+1])==L"remastered"?"remastered":"original")<<";\n";
  for(const char* key:keys){const char* value=std::getenv(key);std::cout<<key<<'='<<(value?value:"<unset>")<<";\n";}
@@ -120,6 +120,19 @@ int wmain(int argc,wchar_t** argv){
    const auto remastered=s.launch(root);
    need(environment(remastered,{{"edition","remastered"},{"MK1_CRT_PRESET","bvm-4k"},{"MK1_SCALEFX","60"},{"MK1_SYNC","immediate"},{"MK1_FILTER","linear"},
         {"MK1_HIGH_REFRESH","1"},{"MK1_GAME_VOLUME","35"},{"MK1_AUDIO_LATENCY","balanced"}}),"Remastered profile read from the ini");}
+  // Widescreen: DISPLAY > SCREEN of the Remastered profile only (TV FRAME, 4:3, WIDESCREEN); the Remastered launch alone gets it.
+  {Session s(root);s.app.openSettings();need(s.app.videoRemastered&&s.app.widescreenAvailable(),"MK3 Remastered Settings offer the widescreen");
+   s.app.selectTab(2);s.app.hitTargets();
+   need(std::any_of(s.app.controls.begin(),s.app.controls.end(),[](const Control& v){return v.id==209&&v.enabled;}),"MK3 SCREEN row enabled");
+   need(s.app.video().bezel&&!s.app.video().widescreen,"MK3 starts on the TV frame");
+   s.app.act(209);need(!s.app.video().bezel&&!s.app.video().widescreen,"SCREEN: 4:3");
+   s.app.act(209);need(s.app.video().widescreen&&!s.app.video().bezel,"SCREEN: widescreen");
+   s.app.selectTab(0);s.app.act(videoProfile);need(!s.app.videoRemastered&&!s.app.widescreenAvailable(),"the Original profile has no widescreen");
+   s.app.act(210);need(has(text(ini),"widescreen=1\r\n")&&s.video(true).widescreen&&!s.video(false).widescreen,"widescreen saved in [Video.Remastered] only");
+   s.app.act(212);
+   need(environment(s.launch(root),{{"edition","remastered"},{"MK3_WIDESCREEN","1"},{"MK1_BEZEL","0"}}),"the MK3 Remastered launch gets the widescreen");
+   s.app.act(3);need(s.engine()==1,"toggle to the Original");
+   need(environment(s.launch(root),{{"edition","original"},{"MK3_WIDESCREEN","<unset>"}}),"the MK3 Original launch has no widescreen");}
   put(ini,"[MK3]\r\nEngine=2\r\n[Video.Remastered]\r\nscanlines=99\r\nscalefx=2\r\nscalefxamount=abc\r\nbrightness=95\r\n[Video.Original]\r\nfilter=9\r\n");
   {Session s(root);const auto& p=s.video(true);
    need(s.engine()==2&&p.scanlines==4&&p.scalefx&&p.scalefxAmount==100&&p.brightness==100&&s.video(false).filter==0,"invalid values fall back to the edition defaults");
