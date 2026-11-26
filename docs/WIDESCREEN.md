@@ -170,8 +170,14 @@ screen are the same. The differences come from how its arenas and its screens ar
   walk alone and shows what the game itself has built. In a finishing move the game stops calling its updater (it is
   called every 8 frames in a fight; 32 without a call count as stopped), and some finishing moves then move the
   scenery by hand: the arena scrolls away under a falling fighter. When the shadow's updater would free an object the
-  game still keeps while the game's own is stopped, that frame's pass goes without the updater too. The margins then
-  hold the blocks the game built for its own window (about 40 columns of each margin) and the planes behind them.
+  game still keeps while the game's own is stopped, that frame's pass goes without the updater too.
+- **Scenery the game moves by hand.** In two places the game shows scenery it built for its own window alone, which
+  no updater extends: a finishing move that scrolls the arena away (every pass that goes without the updater, as
+  above, and the scene under the arena, which is no wider than the arcade's screen), and the passage between two
+  arenas, when an uppercut sends a fighter up through the ceiling (the fight's mode under the camera limits of a
+  screen: the old arena scrolls away by draws outside the display walk, about 40 columns past the arcade's screen
+  at the most, while the new one comes in). Full margins there would need blocks the game never builds, so such a
+  build gets soft sides, from its first frame to its last.
 - **Finishing moves.** From a finishing move's start to the round's end the game has a mode of its own. The wide
   picture goes on like the fight there, as at a round's end and a match's end: same window, same held planes. A
   finishing move with a scene of its own, no wider than the arcade's screen (a pit under the arena), leaves the
@@ -180,17 +186,26 @@ screen are the same. The differences come from how its arenas and its screens ar
 - **A fight that pauses.** Some finishing moves wipe the screen (a white flash) while the game builds no frame for a
   few frames. The fight is still the fight when its builds come back, with its planes where they were held, and a
   page the game filled whole is shown whole (see *Screens* below).
-- **The match's end.** When a match ends the game freezes the fight's last picture and closes the continue screen's
-  doors over it. From the frame the game stops building the arena the wide picture is the arcade's own, centred, with
-  soft sides: a fight that ended within 67 columns of an arena's end moves back to the centre at that instant.
+- **The match's end.** When a match ends the game freezes the fight's last picture: it gives the screen a screen's
+  camera limits, stops clearing the pages and builds nothing on them, then closes the continue screen's doors over
+  them. A page the game has not cleared, whose last build had the wide window's own picture (an offset window, a
+  held far plane), keeps that picture and its window, so nothing moves when a fight ends near an arena's end. What
+  the game then draws on it (the doors) keeps its screen place, over the arcade's 400 columns. The sides stay the
+  fight's while nothing is drawn over the picture and are soft from the first draw on, so no piece of the arena is
+  left beside closed doors. The window goes when the game clears the page for the next screen.
 - **Screens.** A screen is told from an arena by the game's own camera limits (the two pairs it gives every screen
   without an arena): under them nothing is taken for a fight, whatever the mode word says (the tower between two
   fights keeps the round's-end mode) and wherever the camera stands. A far plane's picture no wider than the arcade's
   screen is no arena either (the versus screen: its portraits reach past the screen, its background does not), and an
   arena's scenery is measured over all its planes together, since none of them need cover the screen by itself. Such
   screens get soft sides. A page with soft sides whose margins already hold the colour each arcade line ends in (a
-  page filled whole: a flash, a wipe, black) is shown as it is. The power-on advisory screen is drawn with no display
-  walk on a page the game filled black: its blue bars end at the arcade's screen, with black beside them.
+  page filled whole: a flash, a wipe, black) is shown as it is.
+- **The power-on advisory screen.** At power-on the game clears video RAM with a loop of the CPU's, not with its
+  page clear. A whole line stored in one run, all in one pen, is the page's background like a cleared line, not art:
+  the advisory's blue bars, drawn over it, get soft sides. The bars stop 16 columns short of the arcade's right
+  edge; a picture that stops up to 16 columns short on a straight edge (32 lines or more that end short, 9 in 10 of
+  them at one column) starts its soft side where it ends, as MK1's select screen does, and those black columns take
+  the side's first colour. Dark ragged ends (the doors closing) stay the arcade's.
 
 ## Debug mode
 
@@ -238,8 +253,16 @@ legal replay runs without and with widescreen, and the command checks:
 7. **No black over the picture.** In MK1 and MK3 no fight frame with a lit picture masks more than a speck (16 pixels) of its
    margins (a frame with soft sides shows none of them and is left out). A black bar or block over a sky fails; what is left is a pixel of a farther layer at the screen's last
    column, masked for a few frames of an animation.
-8. **Finishing moves keep the arena.** In MK3 the suite's finishing moves, whose scenes are the arena's, show no
-   frame with soft sides.
+8. **Finishing moves keep the arena.** In MK3 a finishing move shows soft sides only while the game moves the scenery
+   by hand (criterion 9); the suite's other finishing-move frames, whose scenes are the arena's, show none.
+9. **Scenery moved by hand has soft sides.** In MK3 every frame of the fight under a screen's camera limits (the
+   passage between two arenas) and every fight frame whose passes go without the scenery updater (a finishing move
+   that scrolls the arena away) shows soft sides, from the third such frame on (a build's picture is shown two frames
+   later). The suite must reach both.
+10. **The match's end does not move the picture.** In MK3, in the match's end mode, the wide window's offset changes
+   only from one frame with soft sides to another (the next screen, drawn over the fight's last picture). The suite
+   must reach a match that ends with an offset window.
+11. **The power-on screen has soft sides.** In MK3, frames 200 to 590 of every replay (all run from reset).
 
 Continued lines and soft sides (a menu's, a far backdrop's in MK3) are derived from the picture's own edge colours, not
 drawn by the game; criterion 4 covers the game's draws.
@@ -250,5 +273,7 @@ margin columns its art covered and the camera range seen. Replays: MK1 `versus-w
 wall, both fighters); MK2 `finisher_replays/case00`, `case05` and
 `natural-f01-stage-a`; MK3 `fight-route` (the attract, the select screen, the tower and a first fight), `jumps-N`
 (a versus match on arena N of the game's order: both fighters walk to a wall, jump diagonally from wall to wall and
-back, then P1 punches until the round ends; inputs only, `tools/widescreen/mk3_tapes.py`) and `finisher-NAME` (a
-legal finishing-move route of `tools/mk3/r1_finishes.json` from reset).
+back, then P1 punches until the round ends; inputs only, `tools/widescreen/mk3_tapes.py`), `finisher-NAME` (a
+legal finishing-move route of `tools/mk3/r1_finishes.json` from reset; `r1fin01` scrolls the arena away),
+`uppercut-2` (a versus match on arena 2 where P1's uppercut sends P2 up into the next arena) and `corner-7` (a
+versus match on arena 7 that ends at the arena's left end, with the window offset).

@@ -43,6 +43,11 @@ struct Wide : DmaObserver, CpuVramObserver {
     // table's marker, which wait until the real pump has drawn the floor shadows (kMarkerDone).
     bool streamer = false, streaming = false, walk_drawn = false, shadow_post = false;
     uint32_t updater_idle = 0;   // display interrupts since the game last called its updater (up to kUpdaterStopped)
+    // This fight's build shows scenery the game is moving by hand, built for its own window alone: the passage between
+    // two arenas (a fight under a screen's camera limits: the old arena scrolls away by draws outside the walk), or
+    // a finishing move that scrolls the arena away (the shadow's updater gave up: the pass went without it). Its
+    // sides are soft.
+    bool hand = false;
     std::vector<uint32_t> walk_entries;
     struct Draw {
         std::array<uint16_t, 12> entry{};
@@ -57,14 +62,14 @@ struct Wide : DmaObserver, CpuVramObserver {
         w.layer.LayerFields(a);
         a(w.layer.builds, w.layer.ended, w.layer.idle, w.layer.idle_serial);   // the builds' count and the pause without one (Layer::EndFrame)
         a(w.streamer, w.streaming, w.walk_drawn, w.shadow_post, w.walk_entries, w.pending, w.fill_start, w.fill_count,
-          w.faults, w.streamer_skips, w.passes, w.fault_pc, w.updater_idle, w.cpu_next, w.cpu_run);
+          w.faults, w.streamer_skips, w.passes, w.fault_pc, w.updater_idle, w.cpu_next, w.cpu_run, w.hand);
     }
 
     void Start() { layer.Enable(board->o.vram, true); layer.seen = kSeen; layer.edges = false; }
     // A state saved without widescreen was loaded: the layer starts over from what VRAM holds.
     void Restart() {
         layer.Reset(); Start();
-        streamer = streaming = walk_drawn = shadow_post = false; walk_entries.clear(); pending.clear(); fill_count = cpu_run = 0; updater_idle = 0;
+        streamer = streaming = walk_drawn = shadow_post = hand = false; walk_entries.clear(); pending.clear(); fill_count = cpu_run = 0; updater_idle = 0;
     }
     void Attach(Board& b, DmaObserver* dma, CpuVramObserver* cpu, const FloorBlood* stains) {
         board = &b; next_dma = dma; next_cpu = cpu; blood = stains;
@@ -109,8 +114,10 @@ struct Wide : DmaObserver, CpuVramObserver {
             layer.EndFrame();
             if (layer.released && fight) layer.fight = true;
             // A fight's build that leaves its margins without art (a finishing move's own scene, no wider than the
-            // arcade's screen: a pit under the arena) gets soft sides, not black ones.
-            else if (layer.fight && Bare()) layer.page_soft[layer.page] = true;
+            // arcade's screen: a pit under the arena), or whose scenery the game moves by hand, gets soft sides.
+            else if (layer.fight && (hand || Bare())) layer.page_soft[layer.page] = true;
+            // A frozen picture keeps the fight's sides until the screen draws over it; from then on they are soft.
+            else if (Frozen()) layer.page_soft[layer.page] = layer.serial != layer.page_start[layer.page];
             break;
         }
         case w::kStreamer: streamer = streaming = true; updater_idle = 0; break;
@@ -121,8 +128,14 @@ struct Wide : DmaObserver, CpuVramObserver {
             static const std::vector<uint16_t> none;
             const int camera = int16_t(Word(w::kCameraX));
             const unsigned row = Word(w::kPageOrigin + 16) & 0x1ff;
-            layer.StartFrame(row, board->o.vram, blood ? blood->layer : none, camera == layer.held[0] && !ScreenNow());
-            walk_entries.clear(); pending.clear(); walk_drawn = shadow_post = false;
+            // A screen's camera limits end the fight, wherever its camera stands. Over a page the game has not cleared,
+            // whose last build had the wide window's own picture, the screen is drawn on the fight's last picture
+            // (the match's end: the frozen picture, then the continue screen's doors): the page keeps that picture
+            // and its window, and this build's draws keep their screen place over it (Frozen).
+            const bool screen = ScreenNow();
+            layer.StartFrame(row, board->o.vram, blood ? blood->layer : none, screen || camera == layer.held[0]);
+            if (screen && layer.whole) { layer.shift = 0; layer.fight = false; }
+            walk_entries.clear(); pending.clear(); walk_drawn = shadow_post = hand = false;
             break;
         }
         case w::kDrawerStage: case w::kFloorStage: walk_entries.push_back(s.a[1] - 0xc0); break;
@@ -141,7 +154,10 @@ struct Wide : DmaObserver, CpuVramObserver {
         }
         return lines >= Layer::kPicture;
     }
-    // The camera limits are a screen's, not an arena's: a fight's last window does not stay over it, even if its camera
+    // This build is a screen's, drawn over the fight's last wide picture, which its page keeps with its window
+    // (kQueueReset): mk5wide::Layer::whole with no fight (a fight's build that is whole is the fight's).
+    bool Frozen() const { return layer.whole && !layer.fight; }
+    // The camera limits are a screen's, not an arena's: a fight's last window is not this build's, even if its camera
     // stands where the fight's did (a match ended at the arena's left end, then the continue screen at camera 0).
     bool ScreenNow() const { return wide::ScreenLimits(int16_t(Word(wide::kCameraMin)), int16_t(Word(wide::kCameraMax))); }
 
@@ -189,9 +205,15 @@ struct Wide : DmaObserver, CpuVramObserver {
         if (!layer.Enabled()) return;
         const auto wiped = [&](size_t first) { if (((first >> 17) & 1) == layer.page) walk_drawn = false; };
         if (pc != wide::kPageFill) {
-            layer.Mirror(board->o.vram, word, 1);
+            const auto& vram = board->o.vram;
+            layer.Mirror(vram, word, 1);
             cpu_run = word == cpu_next ? cpu_run + 1 : 1; cpu_next = uint32_t(word + 1);
-            if (cpu_run == 1024) { wiped(word); cpu_run = 0; }
+            // A whole line stored in one run, all in one pen, is cleared as the page clear leaves it: the page's
+            // background, not art (the power-on clear of video RAM, under the advisory screen's bars).
+            if (const size_t first = word - 511; (word & 511) == 511 && cpu_run >= 512 &&
+                std::all_of(vram.begin() + ptrdiff_t(first), vram.begin() + ptrdiff_t(word) + 1, [&](uint16_t v) { return v == vram[first]; }))
+                layer.Mirror(vram, first, 512);
+            if (cpu_run % 1024 == 0) wiped(word);
             return;
         }
         if (!fill_count || word != fill_start + fill_count) { fill_start = uint32_t(word); fill_count = 0; }
@@ -276,6 +298,7 @@ private:
             const int camera = int16_t(Word(w::kCameraX)), low = int16_t(Word(w::kCameraMin)), high = int16_t(Word(w::kCameraMax));
             layer.Offset(w::Shifting(mode) || w::Demo(mode, low, high, layer.arena, layer.fight, camera == layer.held[0]), camera, low, high,
                          mode != w::kAttractMode && !w::ScreenLimits(low, high));
+            hand = layer.fight && w::ScreenLimits(low, high);
             if (const auto world = int32_t(Long(w::kScrollFirst + w::kWorldSlot * 0x20 - w::kScrollVelocityGap)))
                 for (unsigned slot = 0; slot < w::kScrollSlots; ++slot)
                     layer.PlaneRatio(slot) = mk5wide::MeasuredRatio(int32_t(Long(w::kScrollFirst + slot * 0x20 - w::kScrollVelocityGap)), world);
@@ -292,7 +315,7 @@ private:
         if (streamer && !streaming && layer.fight) {
             o.Push(w::kStreamerReturn); s.pc = w::kStreamer;
             if (!Run(w::kStreamerReturn, false)) {   // the updater met something it cannot do: this frame's walk without it
-                Undo(); restore(); ++streamer_skips; View();
+                Undo(); restore(); ++streamer_skips; View(); hand = true;
                 if (object) o.Write32(link, 0);
             }
             s.a = a; s.b = b; s.status = status; s.pc = pc;
@@ -333,7 +356,7 @@ private:
                     slot_ = w::FarSlot(s.a[13]);
                     break;
                 case w::kListWalk:   // the world pass: the floor stains lie under its objects
-                    if (s.a[0] == w::kWorldList && blood) {
+                    if (s.a[0] == w::kWorldList && blood && !Frozen()) {   // a frozen picture keeps its stains
                         Draw stains; stains.stains = true;
                         stains.entry[0] = uint16_t(s.a[4]); stains.entry[1] = uint16_t(s.a[4] >> 16);
                         if (!PlaneEnd()) return false;
@@ -383,7 +406,7 @@ private:
                 layer.Book(slot, pointer, [&](uint32_t bit) { return board->o.program.Word(bit); });
             }
         }
-        plane_.push_back({entry, fixed, fresh});
+        plane_.push_back({entry, fixed || Frozen(), fresh});   // over a frozen picture every draw is the screen's
     }
     // An entry's registers for the layer: x in layer columns, the layer's own columns as its clip.
     std::array<uint16_t, 18> LayerRegisters(const std::array<uint16_t, 12>& entry) const {

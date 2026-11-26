@@ -10,7 +10,7 @@ from tools.mk3 import versus
 
 ROOT=Path(__file__).resolve().parents[2]
 F=versus.FRAME
-LEFT,RIGHT,UP,HIGH_PUNCH=4,8,1,0x10
+LEFT,RIGHT,UP,DOWN,HIGH_PUNCH=4,8,1,2,0x10
 CYCLE=240+420+420+240+30+28*20   # frames of one pattern
 
 
@@ -49,6 +49,28 @@ def jumps(arena,cycles=1,pulse=False):
 def campaign(arena=9,cycles=40):
     """Several matches in a row from `arena`: the arenas after it in the game's order."""
     return jumps(arena,cycles,True)
+
+
+def versus_with(arena,rows,end):
+    s=spec(arena)
+    return sorted(list(versus.versus_tape(s['p1'],s['p2'],s['shift'])['tape'])+rows),end//F+300
+
+
+def uppercut(arena=2):
+    """(rows, frames): a versus match on `arena` where the fighters walk into each other and P1 uppercuts three times. On
+    arena 2 the first one sends P2 up through the ceiling into the next arena (the passage between two arenas)."""
+    rows=[];c=spec(arena)['fight']+90*F
+    for stick,frames in ((RIGHT|LEFT<<8,60),*((DOWN,10),(DOWN|HIGH_PUNCH,6),(0,60))*3):
+        rows.append((c,0,0xffff^stick));c+=frames*F
+    return versus_with(arena,rows,c)
+
+
+def corner(arena=7,frames=1700):
+    """(rows, frames): a versus match on `arena` where both fighters hold LEFT and P1 presses High Punch for 4 frames in
+    every 20: the match ends at the arena's left end (the wide window offset when the game freezes its last picture)."""
+    rows=[];c=spec(arena)['fight']+90*F;end=c+frames*F
+    while c<end:rows+=[(c,0,0xffff^(both(LEFT)|HIGH_PUNCH)),(c+4*F,0,0xffff^both(LEFT))];c+=20*F
+    return versus_with(arena,rows+[(end,0,0xffff)],end)
 
 
 def finisher(name):

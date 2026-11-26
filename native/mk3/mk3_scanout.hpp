@@ -72,6 +72,7 @@ struct Scanout {
     static constexpr int16_t kRaw = -1, kBlank = -2;
     static constexpr uint8_t kWideFresh = 32, kWideSoft = 64;   // mk3::Wide::kFresh, kSoft
     static constexpr uint32_t kWideSoftFlag = 0x100000;        // on a pen code: a pixel past a far backdrop's end, shown soft
+    static constexpr int kWideShort = 16;
     const mk5wide::Layer<uint16_t>* wide = nullptr;
     bool wide_present = false;
     std::function<unsigned()> wide_dim;   // the game's fade at the VBLANK, of 256 (mk3::Wide::Dim), for the colours the layer took from the ROM
@@ -191,7 +192,23 @@ struct Scanout {
             for (int x = 0; x < mk5wide::kWideMargin && filled; ++x)
                 filled = line[x] == line[mk5wide::kWideMargin] && line[mk5wide::kWideMargin + mk5wide::kVisible + x] == line[mk5wide::kWideMargin + mk5wide::kVisible - 1];
         }
-        if (wide_soft_work && !filled) mk5wide::SoftMargins(wide_frame.data(), unsigned(kFrameHeight), false, [&](size_t i) { wide_source[i] = kRaw; wide_blood[i] = 0; });
+        // A picture that stops up to kWideShort columns short of the arcade's edge on a straight edge (the power-on
+        // advisory's bars, 16 columns short on the right: kPicture lines or more that end short, 9 in 10 of them at
+        // one column) starts its soft side where it ends, as MK1's select screen does (mk5wide::SoftMargins, join).
+        // Dark ragged ends (the continue screen's doors closing) stay the arcade's.
+        const auto straight = [&](int side) {
+            std::array<int, kWideShort + 1> ends{};
+            int lines = 0;
+            for (int y = 0; y < kFrameHeight; ++y) {
+                const uint32_t* line = wide_frame.data() + size_t(y) * kWideWidth;
+                int gap = 0;
+                while (gap <= kWideShort && !(line[side ? mk5wide::kWideMargin + mk5wide::kVisible - 1 - gap : mk5wide::kWideMargin + gap] & 0xffffffu)) ++gap;
+                if (gap && gap <= kWideShort) { ++lines; ++ends[size_t(gap)]; }
+            }
+            return lines >= mk5wide::Layer<uint16_t>::kPicture && *std::max_element(ends.begin(), ends.end()) * 10 >= lines * 9;
+        };
+        if (wide_soft_work && !filled)
+            mk5wide::SoftMargins(wide_frame.data(), unsigned(kFrameHeight), straight(0) || straight(1), [&](size_t i) { wide_source[i] = kRaw; wide_blood[i] = 0; }, kWideShort);
         wide_shift = wide_shift_work; wide_whole = wide_whole_work; wide_soft = wide_soft_work;
         wide_centre = wide_centre_work; wide_filled = wide_filled_work; wide_audit = wide_audit_work;
         if (!wide_present || presentation.size() != frame.size()) return;

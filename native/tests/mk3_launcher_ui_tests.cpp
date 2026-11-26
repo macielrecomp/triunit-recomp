@@ -38,6 +38,9 @@ struct Session {
  App app;
  explicit Session(const fs::path& root):app(root){app.act(3);need(app.selected==2&&app.chosen==2,"MK3 card chosen");}
  int engine()const{return app.backend.mk3Engine();}
+ // The hashed check of the packages, which the app runs right after its first frame (App::poll); at its start a game
+ // is offered on its setup record alone.
+ void checked(){app.poll();app.availability.wait();app.nextPoll=0;app.poll();}
  std::string launch(const fs::path& root){
   app.act(20);need(app.backend.running(),"MK3 probe launched");
   for(const auto start=GetTickCount64();app.backend.running()&&GetTickCount64()-start<20000;Sleep(10))app.backend.poll();
@@ -120,7 +123,7 @@ int wmain(int argc,wchar_t** argv){
   put(ini,"[MK3]\r\nEngine=2\r\n[Video.Remastered]\r\nscanlines=99\r\nscalefx=2\r\nscalefxamount=abc\r\nbrightness=95\r\n[Video.Original]\r\nfilter=9\r\n");
   {Session s(root);const auto& p=s.video(true);
    need(s.engine()==2&&p.scanlines==4&&p.scalefx&&p.scalefxAmount==100&&p.brightness==100&&s.video(false).filter==0,"invalid values fall back to the edition defaults");
-   need(s.app.backend.status().find(L"do MK3 nativo")!=std::wstring::npos,"fallback reported without blocking the MK3 card");
+   need(s.app.backend.status().find(L"invalid MK3 values")!=std::wstring::npos,"fallback reported without blocking the MK3 card");
    const auto log=s.launch(root);need(environment(log,{{"MK1_CRT_PRESET","bvm-1080"},{"MK1_SCALEFX","100"}}),"Remastered defaults BVM 1080p and ScaleFX 100");}
   // Migration: a profile with [Video.Preview.Remastered] (written before F3) keeps only that section and the edition sections'
   // fullscreen key; the next save writes [Video.Remastered] and drops the old section.
@@ -153,19 +156,19 @@ int wmain(int argc,wchar_t** argv){
   const auto exe=product/L"mk3.exe";const auto good=text(exe);
   {Session s(root);need(s.engine()==2,"Remastered restored");put(exe,good+'\0');
    s.app.act(20);need(!s.app.backend.running()&&s.engine()==2&&!s.app.mk3Available&&!s.app.gameSelected(),"hash mismatch: refused, MK3 unavailable, nothing started");
-   need(s.app.notice.find(L"recusado")!=std::wstring::npos&&clean(s.app.notice),"refusal reported without any fallback");
+   need(s.app.notice.find(L"refused")!=std::wstring::npos&&clean(s.app.notice),"refusal reported without any fallback");
    need(has(text(ini),"Engine=2\r\n"),"saved choice kept after the refusal");put(exe,good);}
   // Package missing: MK3 unavailable, no selection and no launch, the saved choice survives.
   const auto away=product.parent_path()/L"product-away";fs::rename(product,away);
-  {Session s(root);need(!s.app.mk3Available&&!s.app.gameSelected()&&s.engine()==2,"missing package: MK3 unavailable");
+  {Session s(root);s.checked();need(!s.app.mk3Available&&!s.app.gameSelected()&&s.engine()==2,"missing package: MK3 unavailable");
    s.app.act(3);need(s.engine()==2&&has(text(ini),"Engine=2\r\n"),"missing package: no selection, choice kept");
-   need(!s.app.backend.launch()&&!s.app.backend.running()&&s.app.backend.status().find(L"recusado")!=std::wstring::npos&&clean(s.app.backend.status()),"missing package: launch refused, nothing else started");}
+   need(!s.app.backend.launch()&&!s.app.backend.running()&&s.app.backend.status().find(L"refused")!=std::wstring::npos&&clean(s.app.backend.status()),"missing package: launch refused, nothing else started");}
   fs::rename(away,product);
-  {Session s(root);need(s.app.mk3Available&&s.engine()==2,"package back: saved choice restored");}
+  {Session s(root);s.checked();need(s.app.mk3Available&&s.engine()==2,"package back: saved choice restored");}
   // One ROM missing (a link of the staged package; the source ROM stays): MK3 is not offered.
   std::istringstream roms(text(product/L"roms.txt"));std::string sha,size,path;need(bool(roms>>sha>>size>>path),"staged ROM list");
   need(fs::remove(product/L"roms/mk3"/fs::u8path(path)),"remove one staged ROM link");
-  {Session s(root);need(!s.app.mk3Available&&!s.app.gameSelected()&&s.engine()==2,"missing ROM: MK3 unavailable");}
+  {Session s(root);s.checked();need(!s.app.mk3Available&&!s.app.gameSelected()&&s.engine()==2,"missing ROM: MK3 unavailable");}
   std::cout<<"PASS: MK3 card with the two native editions, saved and restored, Engine=0 and old profile migrated, refusal on hash/package/ROM without fallback, "
              "per-edition [Video.Original]/[Video.Remastered] with [Video.Preview.Remastered] migrated, all native video variables, GameVolume and AudioLatency delivered, MK3 Settings enabled\n";
   return 0;

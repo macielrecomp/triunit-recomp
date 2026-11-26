@@ -102,15 +102,17 @@ inline bool ArcadeColumn(int L){return L>=kWideMargin&&L<kWideMargin+kVisible;}
 // over kSoftRows lines up and down and dimmed towards the screen's edge. Nothing of the picture is copied: no object can
 // appear twice. join: the soft side starts where the line's picture ends: the black columns skipped before it take the
 // side's first colour (no black line between the picture and its side; MK1, whose select screen ends short on the right).
+// short_most: the black columns a line's picture may stop short of the arcade's edge (MK3: a picture 16 columns narrower
+// than the screen, the power-on advisory's bars).
 // frame: kLayerWidth columns by height lines, 0xAARRGGBB; touched(index) for each pixel written.
 constexpr int kSoftColumns=4,kSoftRows=10,kSoftSkip=12;
-template<class Touched> void SoftMargins(uint32_t* frame,unsigned height,bool join,Touched&& touched){
+template<class Touched> void SoftMargins(uint32_t* frame,unsigned height,bool join,Touched&& touched,int short_most=kSoftSkip){
     for(int side=0;side<2;++side){
         std::vector<std::array<unsigned,3>> edge(height);std::vector<int> gap(height);   // each line's end colour; its picture's columns short of the edge
         for(unsigned y=0;y<height;++y){
             std::array<unsigned,3> sum{};
             const auto at=[&](int k){return frame[size_t(y)*kLayerWidth+size_t(side?kWideMargin+kVisible-1-k:kWideMargin+k)];};
-            int skip=0;while(skip<kSoftSkip&&!(at(skip)&0xffffffu))++skip;
+            int skip=0;while(skip<short_most&&!(at(skip)&0xffffffu))++skip;
             gap[y]=join&&(at(skip)&0xffffffu)?skip:0;   // a black line is not a short picture
             for(int k=skip;k<skip+kSoftColumns;++k){
                 const uint32_t p=at(k);

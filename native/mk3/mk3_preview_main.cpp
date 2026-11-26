@@ -519,12 +519,12 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
                         std::printf(",\"checks\":[%llu,%llu,%llu,%llu]", (unsigned long long)wide_checks.parallax_checked, (unsigned long long)wide_checks.parallax_differ,
                                     (unsigned long long)wide_checks.still_checked, (unsigned long long)wide_checks.still_moved);
                         std::printf(",\"wide\":{\"centre\":%llu,\"filled\":%llu,\"shift\":%d,\"whole\":%d,\"soft\":%d,\"audit\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu],"
-                                    "\"faults\":%llu,\"fault_pc\":%u,\"skips\":%llu,\"passes\":%llu,\"fight\":%d,\"arena\":%d,\"open\":%d,\"rgb\":\"%016llx\",\"bands\":[",
+                                    "\"faults\":%llu,\"fault_pc\":%u,\"skips\":%llu,\"passes\":%llu,\"fight\":%d,\"arena\":%d,\"open\":%d,\"hand\":%d,\"rgb\":\"%016llx\",\"bands\":[",
                                     (unsigned long long)s.wide_centre, (unsigned long long)s.wide_filled, s.wide_shift, int(s.wide_whole), int(s.wide_soft),
                                     (unsigned long long)au.shown, (unsigned long long)au.sentinel, (unsigned long long)au.masked, (unsigned long long)au.outside,
                                     (unsigned long long)au.outside_real, (unsigned long long)au.generated, (unsigned long long)au.stale,
                                     (unsigned long long)wide->faults, unsigned(wide->fault_pc), (unsigned long long)wide->streamer_skips,
-                                    (unsigned long long)wide->passes, int(l.fight), int(l.arena), int(l.open), (unsigned long long)HashRgb(s.wide_presentation));
+                                    (unsigned long long)wide->passes, int(l.fight), int(l.arena), int(l.open), int(wide->hand), (unsigned long long)HashRgb(s.wide_presentation));
                         // Each measured scenery layer of the last build: the margin columns its art covers at the least.
                         for (size_t k = 0; k < l.bands_done.size(); ++k) {
                             int left = mk5wide::kWideMargin, right = mk5wide::kWideMargin;

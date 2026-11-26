@@ -10,7 +10,7 @@
 #include "mk5_program.hpp"
 
 namespace mk3 {
-inline constexpr uint32_t kSaveStateVersion = 4;   // 2: the Remastered floor blood; 3: its floor pens (fades); 4: widescreen
+inline constexpr uint32_t kSaveStateVersion = 5;   // 2: the Remastered floor blood; 3: its floor pens (fades); 4: widescreen; 5: its hand-moved scenery mark
 inline constexpr const char* kSaveStateRevision = "mk3 2.1";
 inline constexpr const char* kSaveStateMagic = "TRIUNIT-MK3-STATE";
 static_assert(mk2::state::kBlock<Board::As> && mk2::state::kBlock<VideoTiming::Atto>, "128-bit times are copied as blocks");

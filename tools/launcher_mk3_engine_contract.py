@@ -22,7 +22,7 @@ from tools.launcher_backend_build import arguments
 from tools.mk3 import preview,preview_install
 
 # D7 (14/11/2026): the MK3 Settings say that the Remastered edition keeps the arcade audio.
-D7='L"AUDIO DO MK3",L"Remasterizada: video remasterizado, audio original do arcade."'
+D7='L"AUDIO OF THIS GAME",L"Remastered: remastered video, original arcade audio."'
 LIBS=('d3d12','dxgi','d3dcompiler','dxguid','windowscodecs','ole32','uuid','gdi32','user32','shell32','xinput9_1_0')
 
 
@@ -32,12 +32,24 @@ def build(source,exe,scratch,env,extra=()):
                      scratch,cwd=q.ROOT,env=env,timeout=180)
 
 
+def staged(exe,root,units=None):
+    """The package and the setup record the launcher asks for beside it (generated/mk3/<sha>/setup.json, tools/setup/setup.py):
+    the game is offered only with a finished record whose executable has the package's SHA-256."""
+    from tools.setup import setup
+    info=preview_install.write_product(exe,root,units=units)
+    folder=Path('generated/mk3')/info['program_sha256'];(root/folder).mkdir(parents=True);os.link(root/preview_install.PRODUCT/preview_install.EXE,root/folder/preview_install.EXE)
+    (root/folder/'setup.json').write_text(json.dumps(dict(game='mk3',setup_version=setup.SETUP_VERSION,
+        compile=dict(executable=(folder/preview_install.EXE).as_posix(),sha256=info['executable_sha256']))),encoding='utf-8')
+    return info
+
+
 def identity_holds(root):
     """package-identity.json of a staged package against its files and the current tree (M5 package identity)."""
     product=root/preview_install.PRODUCT;ident=json.loads((product/preview_install.IDENTITY).read_text('utf-8'))
     files={preview_install.EXE:ident['executable_sha256'],'roms.txt':ident['rom_list_sha256'],'gfx.txt':ident['graphics_list_sha256'],
            **ident['assets'],**{'roms/mk3/'+p:v['sha256'] for p,v in ident['roms'].items()}}
-    wrong=[f for f,h in files.items() if q.sha(product/f)!=h]+[f for f,h in ident['sources'].items() if q.sha(q.ROOT/f)!=h]
+    now=preview_install.package_identity()['sources']   # the generated includes keep their old tree names (tools/setup/mk3.py identity_files)
+    wrong=[f for f,h in files.items() if q.sha(product/f)!=h]+[f for f in {*ident['sources'],*now} if ident['sources'].get(f)!=now.get(f)]
     return dict(passed=not wrong,files=len(files),sources=len(ident['sources']),units_sha256=ident.get('units_sha256'),differs=wrong[:10])
 
 
@@ -50,14 +62,14 @@ def main():
         exe=s/'mk3-engine-ui.exe'
         r=build('native/tests/mk3_launcher_ui_tests.cpp',exe,s,env,[q.ROOT/'native/launcher/launcher_renderer.cpp']);out['ui_build']=q.compact(r)
         if r['passed']:
-            out['ui_package']=preview_install.write_product(exe,s/'ui');out['ui_identity']=identity_holds(s/'ui')
+            out['ui_package']=staged(exe,s/'ui');out['ui_identity']=identity_holds(s/'ui')
             r=q.command([exe,s/'ui'],s,env=env,timeout=180);out['ui']=q.compact(r)
             if not out['ui_identity']['passed']:r=dict(r,passed=False)
         if r['passed'] and a.live:
-            if a.exe:out['exe_sha256']=q.sha(a.exe);out['live_package']=preview_install.write_product(a.exe,s/'live')
+            if a.exe:out['exe_sha256']=q.sha(a.exe);out['live_package']=staged(a.exe,s/'live')
             else:
                 with preview.Preview() as built:
-                    out['build']=q.compact(built.build);out['live_package']=preview_install.write_product(built.exe,s/'live',units=built.units)
+                    out['build']=q.compact(built.build);out['live_package']=staged(built.exe,s/'live',built.units)
             out['live_identity']=identity_holds(s/'live')
             test=s/'mk3-launcher.exe';r=build('native/tests/mk3_launcher_tests.cpp',test,s,env);out['live_build']=q.compact(r)
             if r['passed']:r=q.command([test,s/'live','native'],s,cwd=q.ROOT,env=env,timeout=180);out['live']=q.compact(r)
