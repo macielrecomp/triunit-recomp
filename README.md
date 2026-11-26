@@ -52,6 +52,7 @@ hardware (**ADSP-2105 DCS**, **6809** sound board, **YM2151**, **OKI ADPCM**).
 | ⚙️ **Native, not emulated** | Each game's program becomes C++ compiled into a Windows executable on your machine. The board's hardware is modelled in the project's own C++. |
 | 🕹️ **Two editions per game** | *Arcade Original* keeps the arcade's image and audio; *Remastered* adds presentation options. Rules, timing, voices and effects are the same in both. |
 | 🖥️ **Modern display** | Widescreen 16:9 drawn by the game itself, CRT and scanline presets, ScaleFX, CAS, SMAA, VRR, high refresh and HDR10. |
+| 🔊 **Studio sound** | Remastered masters the board's own sound in stereo, in real time: rebuilt treble, equalizer, stereo width and a short room. Nothing is replaced. |
 | 🎮 **Made to be played** | Save states, run-ahead (one frame less input lag), training mode with the game's own hit boxes, arcade sticks, your own music. |
 | 🔒 **Local and verifiable** | Nothing is downloaded. Every ROM file is checked against a manifest, and the generated output is checked against pinned digests. |
 
@@ -120,6 +121,7 @@ The digests that the generated output must reproduce are in
 | Arcade Original and Remastered editions | ✅ | ✅ | ✅ |
 | Widescreen 16:9 (Remastered) | ✅ | ✅ | ✅ |
 | Floor blood that stays (Remastered) | ✅ | ✅ | ✅ |
+| Studio sound in stereo (Remastered) | ✅ | ✅ | ✅ |
 | Video filters, CRT presets, TV frame, VRR, HDR10 | ✅ | ✅ | ✅ |
 | Save states, run-ahead, training mode | ✅ | ✅ | ✅ |
 | Your own music (Remastered) | ✅ | ✅ | — |
@@ -225,14 +227,40 @@ layer: the game's state, rules and timing do not change.
 - Adjustable audio queue and per-game software volume. Balanced holds 60 ms
   of sound ahead and returns to the longer reserve for the rest of the session
   after an audio dropout; safe holds 140 ms.
-- Remastered masters the board's own sound in stereo: band-limited
-  reconstruction, the treble above the sound board's band rebuilt from the
-  band below it, equalizer, stereo width, a short room and light bus
-  compression. Nothing is replaced: it is the sound your ROM produces.
-  Arcade Original keeps the reference kernel, in mono.
+- Remastered plays the board's sound through a
+  [studio master in stereo](#studio-sound-remastered). Arcade Original keeps
+  the reference kernel, in mono.
 - In Mortal Kombat and Mortal Kombat II, Remastered can play
   [your own music](#your-own-music-custom_audio); a missing slot falls back to
   the arcade's music.
+
+### Studio sound (Remastered)
+
+The sound boards of these games play in mono, and the DCS board of Mortal
+Kombat II and Mortal Kombat 3 has no treble above about 9 to 11 kHz. In
+Remastered, the board's mix goes through a mastering chain that runs inside
+the game, in real time:
+
+| Step | What it does |
+|------|--------------|
+| Reconstruction | Each source is brought to 48 kHz by a windowed sinc instead of the reference kernel, which loses treble and leaves images. |
+| Noise gate (DCS) | Lowers the sound board's own noise floor between sounds. |
+| Rebuilt treble (DCS) | Fills the band above the sound board's limit, up to 20 kHz, from the band just below it. |
+| Equalizer | More bass and presence, a little less of the low mids. |
+| Stereo width | Opens the mono mix to the sides; summed back to mono, the widening cancels. |
+| Short room | A small room behind the sound, low in the mix. |
+| Bus compression | Light 2:1 compression that follows the level of the programme. |
+
+- It is the sound your ROM produces: no sample, voice or music is replaced or
+  generated, and the timing of every sound is the arcade's.
+- Mortal Kombat's FM music already reaches 20 kHz, so it gets no gate and no
+  rebuilt treble, and a milder equalizer.
+- In Mortal Kombat 3 the board mixes music, voices and effects before the
+  output, so the chain takes the whole mix.
+- The chain adds about 12 ms to the sound of Mortal Kombat II and Mortal
+  Kombat 3 and under 1 ms to Mortal Kombat's.
+- Its state is part of the [save states](#arcade-adjustments-progress-and-save-states).
+- Arcade Original does not go through it: its samples are the reference's.
 
 ### Arcade adjustments, progress and save states
 
@@ -400,7 +428,9 @@ python tools/widescreen/acceptance.py
 |---------|--------|
 | **Linux and macOS versions** | Planned ([issue #1](https://github.com/macielrecomp/triunit-recomp/issues/1)). Today the video, input and build are Windows-only. |
 
-Already shipped, most recent first: widescreen 16:9 for Mortal Kombat 3,
+Already shipped, most recent first: studio sound in stereo for the three
+Remastered editions and a shorter audio queue (60 ms), widescreen 16:9 for
+Mortal Kombat 3,
 widescreen 16:9 for Mortal Kombat and Mortal Kombat II, training mode, run-ahead, save states, controller and arcade
 stick remapping with SOCD, the CRT television frame, HDR10, floor blood that
 stays in all three games, RecompLauncher support.
