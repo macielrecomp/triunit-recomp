@@ -155,7 +155,14 @@ which keeps the arcade's 4:3).
 - **Fast scrolling.** Scenery that enters the arcade's screen is shown at once,
   without the short gap the arcade leaves at the edge of its 4:3 picture.
 - **Menus.** Screens without an arena (menus, story and biography pictures, the
-  select screen) get soft sides in the colour of the picture's own edge.
+  select screen, the power-on screen) get soft sides in the colour of the
+  picture's own edge.
+- **Scenery the game moves by hand (Mortal Kombat 3).** The passage from one
+  arena to the next after an uppercut, and a stage finishing move that scrolls
+  the arena away, are built by the game for its 4:3 screen only. Those moments
+  get the same soft sides: no black block, no leftover piece of art.
+- **The match's end.** The picture stays where the fight ended while the next
+  screen is drawn over it, also at an arena's end.
 
 How it works, its rules and its tests: [`docs/WIDESCREEN.md`](docs/WIDESCREEN.md).
 
