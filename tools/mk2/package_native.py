@@ -8,7 +8,7 @@ from tools.launcher_backend_build import arguments
 ROOT=q.ROOT
 SOURCES=[p for p in run.SOURCES if p!='native/tests/mk2_foundation_tests.cpp']+[
     'native/mk2/mk2_native_check.cpp','native/mk2/mk2_music.cpp','native/src/mk5_window.cpp','native/src/mk5_audio_output.cpp']
-FLAGS=['-std=c++17','-O1','-Wall','-Wextra','-Werror','-Wno-unused-parameter',
+FLAGS=['-std=c++17','-O2','-Wall','-Wextra','-Werror','-Wno-unused-parameter',
        '-Wno-missing-field-initializers','-pthread','-municode','-Inative/include']
 LIBRARIES=['-l'+n for n in ('bcrypt','user32','gdi32','winmm','d3d12','dxgi','d3dcompiler','dxguid','windowscodecs','ole32','uuid')]
 

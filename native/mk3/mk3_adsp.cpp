@@ -1,4 +1,5 @@
 #include "mk3_adsp.hpp"
+#include "mk2_state_io.hpp"
 #include "mk3_dcs.hpp"
 #include "mk5_program.hpp"
 #include <algorithm>
@@ -563,6 +564,7 @@ void Dcs8k::Untranslated() const {
 }
 
 void Dcs8k::Log(char kind, uint16_t at, uint64_t cycle, uint16_t address, uint32_t value) {
+    ++access_count_;
     const AdspAccess access{boot, cycle, at, kind, address, value};
     if (!observe_access || observe_access(*this, access)) accesses.push_back(access);
 }
@@ -667,6 +669,37 @@ void Dcs8k::InternalTimer() {
     SetIrq(5, true); SetIrq(5, false);   // ADSP2105_TIMER, edge triggered: ASSERT then CLEAR (set_input_line queue)
 }
 
+}
+namespace mk2::state {
+// The value fields an ADSP instruction can change without a bus access: scalars and small arrays byte for byte, a
+// vector as its length (its entries are records of what happened), an array of more than 256 bytes (a memory) left out.
+struct WaitArchive {
+    static constexpr bool reading = false;
+    bool snapshot;
+    std::vector<uint8_t>& bytes;
+    std::array<const void*, 4> clocks;   // fields every instruction moves, and the scheduler's next timer (read at a bus access only)
+    void Raw(const void* data, size_t size) {
+        for (const void* clock : clocks) if (clock == data) return;
+        bytes.insert(bytes.end(), static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + size);
+    }
+    uint64_t Size(uint64_t size) { Raw(&size, sizeof size); return size; }
+    template<class... T> void operator()(T&... values) { (Io(*this, values), ...); }
+};
+template<class T, class Al> void Io(WaitArchive& a, std::vector<T, Al>& values) { a.Size(values.size()); }
+template<class T, size_t N> void Io(WaitArchive& a, std::array<T, N>& values) {
+    if (sizeof values <= 256) for (auto& value : values) Io(a, value);
+}
+}
+namespace mk3 {
+
+static void WaitFields(mk2::state::WaitArchive& archive, Dcs8k& dcs) { Fields(archive, dcs); }   // the friend, not Dcs8k::Fields()
+void Dcs8k::WaitState(std::vector<uint8_t>& state) const {
+    state.clear();
+    mk2::state::WaitArchive archive{false, state, {&local_ns, &totalcycles, &instructions, &host_next_ns}};
+    WaitFields(archive, const_cast<Dcs8k&>(*this));
+    archive.Raw(&access_count_, sizeof access_count_);
+}
+
 bool Dcs8k::FireTimers() {   // schedule.cpp execute_timers: expiries the ADSP cannot fit another whole cycle before
     for (bool fired = false;; fired = true) {
         if (irq1_clear_ns_ < local_ns + kCycleNs && irq1_clear_ns_ <= dac_next_ns_ && irq1_clear_ns_ <= int_next_ns_) {
@@ -713,10 +746,27 @@ void Dcs8k::Run(const std::vector<HostEvent>& events, uint64_t horizon_ns, const
     // A self-synchronization in an earlier slice only splits slices and does not move the event.
     // check_irqs runs only where a timeslice really executes (execute_run, called when a whole cycle fits), so an
     // input-line change applied between slices stays pending and observable until then.
+    // An idle DSP waits in a loop of a few instructions that changes nothing (its sound OS polls a register a timer
+    // moves). Three arrivals in a row at one PC by a backward transfer, the last two with the same WaitState: the
+    // instructions between them made no bus access and changed nothing, so a turn of the loop from that state always
+    // comes back to it. Its whole turns up to the next timer or the slice's end are then counted, not run, here and
+    // at any later arrival in that same state (a bus access since makes the state another). The clocks and the place
+    // in the loop come out as if every instruction had run. Not with a host event in progress nor with an observer.
+    static constexpr unsigned kWaitRest = 64;   // backward transfers passed over after a state that differed (a loop at work)
     auto run_to = [&](uint64_t target, const HostEvent* event) {
         bool slice_start = true;
+        uint16_t turn_pc = 0xffff;
+        uint64_t turn_at = 0;
+        unsigned rest = 0;
+        bool have = false;
+        const auto turns = [&](uint64_t turn) {
+            const uint64_t limit = std::min(target, NextTimerNs());
+            if (limit <= local_ns) return;
+            const uint64_t skipped = (limit - local_ns) / kCycleNs / turn * turn;
+            local_ns += skipped * kCycleNs; totalcycles += skipped; instructions += skipped;
+        };
         for (;;) {
-            if (FireTimers()) slice_start = true;   // timers still expire while RESET is held
+            if (FireTimers()) { slice_start = true; have = false; turn_pc = 0xffff; wait_clean_ = false; }   // timers still expire while RESET is held
             // A DCS timer inside the writing main-CPU instruction would end the slice before end_ns.
             if (const uint64_t t = NextTimerNs(); event && t > event->write_ns && t <= event->end_ns)
                 Reject("DCS timer inside a host write instruction");
@@ -743,8 +793,26 @@ void Dcs8k::Run(const std::vector<HostEvent>& events, uint64_t horizon_ns, const
                     target = std::min(target, event->write_ns);
                 }
             }
+            if (slice_start) { have = false; turn_pc = 0xffff; wait_clean_ = false; }   // it synchronized or ate its slice
+            else if (!event && !stop && !observe && pc < ppc_) {   // a backward transfer ends a turn of a loop
+                if (wait_turn_ && pc == wait_pc_) {
+                    if (!wait_clean_) { WaitState(wait_now_); wait_clean_ = wait_now_ == wait_state_; }
+                    if (wait_clean_) { turns(wait_turn_); rest = kWaitRest; }
+                    else wait_turn_ = 0;
+                } else wait_clean_ = false;
+                if (rest) { --rest; have = false; turn_pc = 0xffff; }
+                else if (pc != turn_pc) { turn_pc = pc; have = false; }
+                else if (!have) { WaitState(wait_state_); have = true; wait_turn_ = 0; }
+                else {
+                    WaitState(wait_now_);
+                    if (wait_now_ == wait_state_ && instructions > turn_at) { wait_pc_ = pc; wait_turn_ = instructions - turn_at; wait_clean_ = true; turns(wait_turn_); }
+                    rest = kWaitRest; have = false; turn_pc = 0xffff;
+                }
+                turn_at = instructions;
+            }
         }
     };
+    if (!events.empty()) wait_clean_ = false;
     for (const auto& event : events) {
         if (event.write_ns < local_ns || event.end_ns < event.write_ns) throw std::runtime_error("MK3 DCS host events out of order");
         if (event.kind == HostEvent::DataRead) {   // data_r with m_auto_ack: delayed_ack_w() directly, no synchronize

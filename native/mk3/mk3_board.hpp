@@ -194,7 +194,9 @@ private:
         dcs.host_next_ns = next == kNever ? ~0ull : uint64_t((next + kNs - 1) / kNs);
         const uint64_t before = dcs.synchronizations;
         try {
-            dcs.Run({}, target_ns, [&](const Dcs8k& d) { return user = dcs_stop && dcs_stop(d); });
+            // no predicate without a dcs_stop: the ADSP's loop then calls nothing before each instruction
+            if (dcs_stop) dcs.Run({}, target_ns, [&](const Dcs8k& d) { return user = dcs_stop(d); });
+            else dcs.Run({}, target_ns, nullptr);
         } catch (const std::runtime_error& e) {
             dcs_frontier = e.what();
             o.dcs_known = false;

@@ -24,6 +24,7 @@ public:
     bool RetireDspInstruction(bool deliver_output = true) {
         return !pending_.empty() && SynchronizeEvents(deliver_output ? Boundary::Dsp : Boundary::IsolatedDsp);
     }
+    bool Quiet() const { return pending_.empty(); }   // nothing waits for a DSP instruction boundary
     uint16_t Control() const { return control_; }
     uint16_t MainStatus() const { return control_ >> 4; }
     bool ResetAsserted() const { return reset_; }

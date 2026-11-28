@@ -35,6 +35,13 @@ class AdspBoot {
     // The live domain without observation (live_host_domain_, no trace) counts its bus accesses without recording them:
     // nothing reads them there, the drain (DiscardLiveObservations) runs at the same counts and AccessCount is the same.
     uint64_t unrecorded_accesses_ = 0;
+    // The idle wait (DcsBootMachine::RunDspUntil). WaitState: everything an instruction can change or read without a
+    // counted bus access, an event record or a host hook, and the counts of those. music_calls_: host hook calls (a
+    // count of this session, not state).
+    uint64_t music_calls_ = 0;
+    void WaitState(std::vector<uint64_t>& state) const;
+    uint64_t InstructionRoom() const;   // instructions the budget of ExecuteInstruction still allows
+    void SkipInstructions(uint64_t count, uint64_t last_ticks) { instruction_count_ += count; cycles += count; instruction_ticks_ = last_ticks; }
     void Record(uint16_t address, uint32_t value, char space) {
         if (live_host_domain_ && !observe_trace_) ++unrecorded_accesses_;
         else accesses.push_back({instruction_pc_, address, value, cycles, space});
@@ -232,6 +239,7 @@ class DcsBootMachine {
     unsigned dma_completions_ = 0;
     void AdmitWaitAfterC8(struct BoardBootControls&, uint64_t end_cycle);
     void RunDspUntil(uint64_t ticks);
+    std::vector<uint64_t> wait_state_, wait_now_;   // RunDspUntil's two arrivals (scratch, not state)
     uint64_t NextTimerTicks() const {
         uint64_t next = std::min(next_scanline_ticks_, next_sound_ticks_);
         if (sport_deadline_ticks_) next = std::min(next, sport_deadline_ticks_);

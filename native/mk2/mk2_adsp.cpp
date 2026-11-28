@@ -724,12 +724,36 @@ void AdspBoot::Step() {
     link_.RetireDspInstruction(false);
 }
 
+uint64_t AdspBoot::InstructionRoom() const {
+    if (presentation_only_) return ~uint64_t(0);
+    const uint64_t ceiling = live_host_domain_ ? live_instruction_ceiling_ : main_horizon_*16/10 + 1;
+    return InstructionCount() < ceiling ? ceiling - InstructionCount() : 0;
+}
+
+void AdspBoot::WaitState(std::vector<uint64_t>& state) const {
+    state.clear();
+    const auto put = [&](const auto&... value) { (state.push_back(uint64_t(value)), ...); };
+    const auto all = [&](const auto& values) { for (const auto& value : values) state.push_back(uint64_t(value)); };
+    const auto bank = [&](const auto& b) { put(b.ar, b.si, b.af, b.mx0, b.mx1, b.ax0, b.ax1, b.ay0, b.ay1, b.my0, b.my1,
+                                               b.mr0, b.mr1, b.mr2, b.mf, b.se, b.sb, b.sr0, b.sr1); };
+    put(pc, cntr, px, mstat, imask, icntl, astat, sstat, pc_sp, cntr_sp, loop_sp, stat_sp, rom_bank, ifc, boot_reloads);
+    bank(*this); bank(alternate_);
+    all(i); all(l); all(m); all(pc_stack_); all(counters_); all(control); all(discarded_observations_);
+    for (const auto& loop : loops_) put(loop.start, loop.end);
+    put(dag_base0_, interrupt_.pc, interrupt_.mstat, interrupt_.imask, interrupt_.astat, link_.Irq2Asserted(), link_.ResetAsserted(),
+        sport_ireg, sport_size, sport_incs, sport_base, sport_enabled, sport_dma_position, sport_irq1_asserted, sport_irq1_latched,
+        sport_timer_cancelled, presentation_only_, main_horizon_, live_host_domain_, service_irq_domain_, live_instruction_ceiling_,
+        rebooted_, reset_pending_, dac_write_sample_, dac_last_ticks_, dac_bufin_, dac_bufout_, dac_enabled_, observe_trace_,
+        instruction_pc_, AccessCount(), music_calls_, trace.size(), reboot_events.size(), serial_events.size(), sport_transfers.size(),
+        sport_pcm.size(), sport_dma_positions.size(), sport_irq1_events.size());
+}
+
 void AdspBoot::ExecuteInstruction() {
     // At least ten half-ticks per instruction across the finite cooperative-batch main horizon.
     if (!presentation_only_ && InstructionCount() >= (live_host_domain_ ? live_instruction_ceiling_ : main_horizon_*16/10 + 1)) throw std::runtime_error("ADSP diagnostic instruction budget exceeded");
     if (!presentation_only_ && (imask & 0x20) && link_.Irq2Asserted()) EnterIrq2();
     else if (!presentation_only_ && (imask & 4) && (sport_irq1_asserted || ((icntl & 2) && sport_irq1_latched))) EnterIrq1();
-    if(music_instruction_ && rebooted_ && (pc==8 || pc==0x21 || pc==0x31 || pc==0xa4 || pc==0xa5 || pc==0xaa || pc==0x13b))music_instruction_(*this);
+    if(music_instruction_ && rebooted_ && (pc==8 || pc==0x21 || pc==0x31 || pc==0xa4 || pc==0xa5 || pc==0xaa || pc==0x13b)){++music_calls_;music_instruction_(*this);}
     // Unknown PCs/opcodes fail before CPU mutation; other scope failures are terminal.
     instruction_pc_ = pc;
     if (observe_trace_) trace.push_back(Registers());
@@ -839,6 +863,17 @@ void DcsBootMachine::RunDspUntil(uint64_t ticks) {
             "; current " + std::to_string(dsp_ticks_) + "; main " + std::to_string(last_main_) +
             "; DMA deadline " + std::to_string(dma_deadline_subticks_));
     }
+    // An idle DSP waits in a loop of a few instructions that changes nothing (its sound OS polls a register the serial
+    // port moves). Three arrivals in a row at one PC by a backward transfer, the last two with the same WaitState and
+    // nothing waiting on the link: the instructions between them read and changed nothing that can move before this
+    // slice ends, so its remaining whole turns of the loop are counted, not run. The clocks, the instruction counts and
+    // the place in the loop come out as if every instruction had run. kWaitRest: backward transfers passed over after
+    // a state that differed (a loop at work).
+    static constexpr unsigned kWaitRest = 64;
+    uint16_t before = dsp.pc, turn_pc = 0xffff;
+    uint64_t turn_at = 0;
+    unsigned rest = 0;
+    bool have = false;
     while (ticks - dsp_ticks_ >= 10) {
         const uint64_t serial_count = dsp.SerialEventCount();
         if (!link.ResetAsserted()) { dsp.SetInstructionTicks(dsp_ticks_); dsp.ExecuteInstruction(); }
@@ -852,6 +887,24 @@ void DcsBootMachine::RunDspUntil(uint64_t ticks) {
         const bool irq2_was_asserted = link.Irq2Asserted();
         const bool irq2_clear_delivered = link.RetireDspInstruction();
         if (dsp.ApplyPendingReset() || (irq2_was_asserted && irq2_clear_delivered)) break;
+        const uint16_t pc = dsp.pc;
+        if (pc < before) {
+            const uint64_t count = dsp.InstructionCount();
+            if (rest) { --rest; have = false; turn_pc = 0xffff; }
+            else if (pc != turn_pc) { turn_pc = pc; have = false; }
+            else if (!have) { dsp.WaitState(wait_state_); have = true; }
+            else {
+                dsp.WaitState(wait_now_);
+                const uint64_t turn = count - turn_at;
+                if (wait_now_ == wait_state_ && link.Quiet() && turn) {
+                    const uint64_t turns = std::min((ticks - dsp_ticks_) / 10, dsp.InstructionRoom()) / turn;
+                    if (turns) { dsp_ticks_ += turns * turn * 10; dsp.SkipInstructions(turns * turn, dsp_ticks_ - 10); }
+                }
+                rest = kWaitRest; have = false; turn_pc = 0xffff;
+            }
+            turn_at = count;
+        }
+        before = pc;
     }
 }
 

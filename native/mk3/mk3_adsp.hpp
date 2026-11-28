@@ -158,9 +158,20 @@ private:
           d.dac_next_ns_, d.dac_period_ns_, d.irq1_clear_ns_, d.read_slice_min_ns_, d.read_slice_max_ns_, d.dac_ireg_,
           d.dac_size_, d.dac_sample_ns_, d.dac_incs_, d.dac_arms_, d.dac_enabled_, d.timer_start_cycles_, d.int_next_ns_,
           d.timer_start_count_, d.timer_scale_, d.timer_period_, d.timers_fired_, d.timer_enable_, d.timer_ignore_);
+        if constexpr (A::reading) { d.wait_turn_ = 0; d.wait_clean_ = false; }   // a loaded state: the wait is found again
     }
     [[noreturn]] void Reject(const std::string& what) const;
     bool Step();                       // one instruction; true when it synchronized (aborts the ADSP timeslice)
+    // The idle wait (Run). WaitState: every value field but the clocks, a vector as its length, the memories left out;
+    // access_count_ (bus accesses, Log) stands for them. wait_pc_, wait_turn_, wait_state_: a loop found to change
+    // nothing, its state on arrival and its length in instructions (0: none). wait_clean_: nothing from outside (a
+    // timer, a host event, a loaded state) has touched the DSP since it last arrived in that state, so the next
+    // arrival is in it too. Scratch of this session, not state.
+    uint64_t access_count_ = 0, wait_turn_ = 0;
+    bool wait_clean_ = false;
+    uint16_t wait_pc_ = 0xffff;
+    std::vector<uint8_t> wait_state_, wait_now_;
+    void WaitState(std::vector<uint8_t>& state) const;
     void CoreReset();                  // device_t::reset(): interface_pre_reset + adsp21xx device_reset
     void DcsReset(uint64_t ns);        // dcs_audio_device::dcs_reset (REV_DCS1)
     void Boot();                       // dcs_boot: load_boot_data from the current sound-data bank
