@@ -26,6 +26,8 @@ FRAME=r'''
                 const unsigned W=mk2::Scanout::kWideWidth,X=scanout.width(),H=scanout.height(),margin=(W-X)/2;
                 uint64_t centre=0;
                 if(accept_wide&&!scanout.wide_whole()){const auto& w=scanout.wide_pixels();for(unsigned y=0;y<H;++y)for(unsigned x=0;x<X;++x)centre+=w[y*W+margin+x]!=scanout.pixels()[y*X+x];}
+                if(accept_wide){static mk5wide::Flash flash;   // advisory: the frame before, when its margins flash alone
+                    if(const unsigned n=flash.Feed(scanout.wide_pixels(),W,H))std::cerr<<"FLASH "<<scanout.frames()-1<<" "<<n<<char(10);}
                 if(accept_wide&&std::getenv("ACCEPT_TRACE")){static int flags=-1;const auto& l=video.wide;const int now=int(l.fight)|int(l.scene)<<1|int(l.arena)<<2|int(l.whole)<<3;
                     if(now!=flags){flags=now;std::cerr<<"OUT state frame "<<scanout.frames()<<" fight "<<l.fight<<" scene "<<l.scene<<" arena "<<l.arena<<" whole "<<l.whole<<" limits "<<l.limits[0]<<".."<<l.limits[1]<<"/"<<l.limits[2]<<" held "<<l.held[0]<<","<<l.held[1]<<char(10);}}
                 if(accept_wide&&std::getenv("ACCEPT_TRACE")){static unsigned seen=0,quiet=0;const auto& l=video.wide;   // display frames without a build (Layer::Paused)
@@ -188,6 +190,8 @@ def run(all_replays,table):
                 tape=scratch/f'{name}.json';tape.write_text(json.dumps(mk2_tapes.MADE[name]()))
             (r0,plain),(r1,wide)=play(exe,tape,scratch/'plain',False),play(exe,tape,scratch/'wide',True)
             bad=[]
+            flashes=[tuple(map(int,l.split()[1:3])) for l in r1.stderr.splitlines() if l.startswith('FLASH ')]   # advisory (mk5wide::Flash)
+            if flashes:print(f'MK2 {name}: margins flash alone at (frame, pixels)',flashes[:40],len(flashes))
             if os.environ.get('ACCEPT_TRACE'):print(r1.stderr[-int(os.environ.get('ACCEPT_TRACE_TAIL','4000')):])
             if r0.returncode or r1.returncode:bad.append(f'exit {r0.returncode}/{r1.returncode}: {(r1.stderr or r0.stderr)[-600:]}')
             fp=[x for x in plain if x[0]=='F'];fw=[x for x in wide if x[0]=='F'];cp=[x for x in plain if x[0]=='C'];cw=[x for x in wide if x[0]=='C']

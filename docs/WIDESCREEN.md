@@ -342,6 +342,15 @@ legal replay runs without and with widescreen, and the command checks:
    with more than 12 columns inside the wide picture, unless the game itself started it in view (a scene that opens
    with the object on the arcade's screen).
 
+The command also lists, per replay, the frames whose margins flash alone (`mk5wide::Flash`, advisory, on the presented
+frame in MK1 and MK3): a pixel flashes when the frames before and after it agree and it differs from them by more than
+one step of a 5-bit channel. A frame is listed when 1% of its margins or more flash, four times as densely as the
+arcade's columns (a shake or a strobe flash everywhere), in margins that are otherwise the same before and after
+(9 pixels in 10: a texture that scrolls agrees with itself two frames later by chance). The list is where to look for
+a one-frame fault in the margins; a listed frame is not a failure. What it lists in the suite's replays: a fighter's
+one-frame pose at the picture's edge, and frames of the game's own palette animation where the margins hold more of
+the animated colour than the arcade's columns.
+
 The continuation of a narrow layer's lines has a test of its own with no ROM (`native/tests/mk5_wide_layer_tests.cpp`,
 in `python tools/quality/run.py fast`): a made-up layer, flat and dithered, with and without a nearer layer over each
 of its ends.

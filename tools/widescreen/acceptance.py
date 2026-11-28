@@ -62,7 +62,7 @@ def mk1(all_tapes):
             result=json.loads(lines[-1]) if lines else {}
             print(f'MK1 {name}:',r['passed'] and 'PASS' or 'FAIL',{k:v for k,v in result.items() if k!='coverage'})
             for line in ((r.get('stderr') or '')+r['stdout']).splitlines():
-                if line.startswith('parallax'):print('  ',line)
+                if line.startswith(('parallax','flash')):print('  ',line)   # flash: advisory (mk5wide::Flash)
             if not r['passed']:failures.append(f'MK1 {name}: '+(r.get('stderr') or r['stdout'])[-800:].strip())
             if name=='demos' and not result.get('ring'):failures.append('MK1 demos: no copy of a wrapping far-plane part was staged (the ring of clouds was never reached)')
             if result.get('coverage'):table(f'MK1 {name}: edge coverage',result['coverage'])

@@ -8,6 +8,8 @@
 // The window's offset after a fight (mk5wide::Layer::Offset, Paused): it stays while the camera does, build after
 // build, and not across display interrupts without a build (another screen, whatever its camera).
 // A build the game drops (mk5wide::Layer::StartFrame): its margins stay only beside the picture it drew.
+// The acceptance's flash advisory (mk5wide::Flash): a block that shows in a margin for one frame of a standing picture is
+// listed; a texture that scrolls and a block that flashes in the arcade's columns too are not.
 #include "../include/mk5_wide.hpp"
 #include <cstdio>
 #include <stdexcept>
@@ -102,12 +104,28 @@ void dropped(){
                  drawn?"a build's margins stay beside the picture it drew":"a dropped build's margins go with it");
     }
 }
+void flash(){
+    constexpr unsigned H=254;
+    const auto frame=[&](int scroll,bool margin_block,bool centre_block){
+        std::vector<uint32_t> f(size_t(W)*H);
+        for(unsigned y=0;y<H;++y)for(int x=0;x<W;++x){
+            const bool block=y>=100&&y<140&&((margin_block&&x<40)||(centre_block&&x>=200&&x<440));
+            f[size_t(y)*W+size_t(x)]=block?0xffffffu:uint32_t(((x+scroll)*7+int(y)*3)%23*0x0a0b0c);
+        }
+        return f;
+    };
+    const auto listed=[&](const std::array<std::vector<uint32_t>,3>& frames){Flash flash;unsigned n=0;for(const auto& f:frames)n=flash.Feed(f,unsigned(W),H);return n;};
+    need(listed({frame(0,false,false),frame(0,true,false),frame(0,false,false)})==40*40,"a block that shows in a margin for one frame of a standing picture is listed");
+    need(!listed({frame(0,false,false),frame(0,true,true),frame(0,false,false)}),"a flash in the arcade's columns too is not listed");
+    need(!listed({frame(0,false,false),frame(2,false,false),frame(3,false,false)}),"a texture that scrolls is not listed");
+}
 }
 
 int main(){
-    try{check(false);check(true);texture();offset();dropped();}
+    try{check(false);check(true);texture();offset();dropped();flash();}
     catch(const std::exception& error){std::printf("FAIL: %s\n",error.what());return 1;}
     std::printf("wide layer: a line goes on from its own art, flat and dithered, with and without a nearer layer over its ends; "
-                "the window's offset does not outlive a pause in the builds; a dropped build's margins go with it\n");
+                "the window's offset does not outlive a pause in the builds; a dropped build's margins go with it; "
+                "a margin that flashes alone is listed\n");
     return 0;
 }

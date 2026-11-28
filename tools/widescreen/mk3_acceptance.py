@@ -106,6 +106,8 @@ def run(all_replays,table):
             if name=='corner-7' and not arena['end_shifted']:bad.append("10: no match ended with an offset window")
             if arena['advisory_sharp'] or not arena['advisory']:bad.append(f"11: {arena['advisory_sharp']} of {arena['advisory']} frames of the power-on screen do not have soft sides")
             if last.get('faults'):bad.append(f"the shadow pass faulted {last['faults']} times (PC {last.get('fault_pc',0):08x})")
+            flashes=[(x['frame']-1,x['wide']['flash']) for x in fw if x['wide'].get('flash')]   # advisory (mk5wide::Flash)
+            if flashes:print(f'MK3 {name}: margins flash alone at (frame, pixels)',flashes[:40],len(flashes))
             print(f'MK3 {name}:','FAIL' if bad else 'PASS',{'frames':len(fw),'faults':last.get('faults'),'updater_skips':last.get('skips'),**total,
                    'parallax':checks[:2],'still':checks[2:],'fight_frames':arena['frames'],'fight_measured':arena['measured'],
                    'fight_sentinel':arena['sentinel'],'fight_stale':arena['stale'],'fight_masked':arena['masked'],'masked_frames':arena['masked_frames'],

@@ -85,6 +85,32 @@ constexpr uint32_t kMasked=0xff000000;     // black: a margin pixel without art 
 // shadow pass meant to cover it (an object the arcade has not built yet: the real walk never drew it).
 struct Audit{uint64_t shown=0,sentinel=0,masked=0,outside=0,outside_real=0,generated=0,stale=0,filled=0;   // outside_real: of outside, a real DMA's
     void Add(const Audit& o){shown+=o.shown;sentinel+=o.sentinel;masked+=o.masked;outside+=o.outside;outside_real+=o.outside_real;generated+=o.generated;stale+=o.stale;filled+=o.filled;}};
+// Diagnostics (the acceptance harnesses feed it every shown wide frame, kVisible columns between two margins): the frame
+// before the one fed, when its margins flash and the arcade's columns do not. A pixel flashes when the frames before and
+// after it agree and it differs from them by more than one step of a 5-bit channel (a fade's step and a soft side's
+// drift are less). A flash is 1% of the margins or more, four times as dense as in the arcade's columns (a shake or a
+// strobe flash everywhere), in margins that are otherwise the same before and after (9 pixels in 10: a texture that
+// scrolls agrees with itself two frames later by chance). Returns the margin pixels that flashed, 0 when none.
+struct Flash{
+    std::array<std::vector<uint32_t>,2> before;unsigned fed=0;
+    static bool Far(uint32_t a,uint32_t b){
+        for(int shift=0;shift<24;shift+=8)if(std::abs(int(a>>shift&255)-int(b>>shift&255))>8)return true;
+        return false;
+    }
+    unsigned Feed(const std::vector<uint32_t>& now,unsigned width,unsigned height){
+        const unsigned margin=(width-unsigned(kVisible))/2;uint64_t margins=0,centre=0,same=0;
+        if(fed>=2&&before[0].size()==now.size()&&before[1].size()==now.size()&&now.size()==size_t(width)*height)
+            for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){
+                const size_t i=size_t(y)*width+x;const bool side=x<margin||x>=width-margin;
+                if(before[0][i]!=now[i])continue;
+                same+=side;
+                if(Far(before[1][i],now[i]))++(side?margins:centre);
+            }
+        before[0]=std::move(before[1]);before[1]=now;++fed;
+        const uint64_t margin_area=uint64_t(2)*margin*height,centre_area=uint64_t(kVisible)*height;
+        return same*10>=margin_area*9&&margins*100>=margin_area&&margins*centre_area>4*centre*margin_area?unsigned(margins):0u;
+    }
+};
 // A scenery layer's draw in a build (debug, the parallax check): its layer, image source and row, its columns (layer
 // columns) and its list's camera x (scenery moves by minus the camera's move; an object with a velocity of its own does not).
 struct Note{uint16_t layer;uint32_t source;uint16_t row;int16_t lo,hi,camera;};

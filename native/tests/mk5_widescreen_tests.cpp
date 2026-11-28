@@ -97,6 +97,8 @@ Run Play(const std::filesystem::path& root,const std::vector<uint32_t>& tape,con
         const unsigned X=screen.width(),H=screen.height(),margin=(W-X)/2;
         const auto& wide=screen.wide_pixels();const auto& p=screen.wide_presentation();const auto& b=screen.wide_backdrop_pixels();
         const int shift=screen.wide_shift();const bool whole=screen.wide_whole();
+        {static mk5wide::Flash flash;   // advisory: the frame before, when its margins flash alone
+            if(const unsigned n=flash.Feed(p,W,H))std::cerr<<"flash frame "<<before-1<<" margins "<<n<<char(10);}
         if(whole){++run.shifted_frames;run.shifted_masked+=screen.wide_audit().masked;}
         // Two differences belong to the picture: a pixel the shadow filled where the arcade has not drawn an object yet (the
         // frame's audit counts them, each at most once raw, once presented and once in the backdrop), and, on a screen with
