@@ -36,10 +36,20 @@ FRAME=r'''
                     dump<<"P6"<<char(10)<<W<<" "<<H<<char(10)<<255<<char(10);for(auto rgb:scanout.wide_pixels()){dump.put(char(rgb>>16));dump.put(char(rgb>>8));dump.put(char(rgb));}
                     std::ofstream narrow(std::filesystem::path(std::getenv("ACCEPT_DUMP_DIR"))/("arcade-"+std::to_string(scanout.frames())+".ppm"),std::ios::binary);
                     narrow<<"P6"<<char(10)<<X<<" "<<H<<char(10)<<255<<char(10);for(auto rgb:scanout.pixels()){narrow.put(char(rgb>>16));narrow.put(char(rgb>>8));narrow.put(char(rgb));}
+                    std::ofstream raw(std::filesystem::path(std::getenv("ACCEPT_DUMP_DIR"))/("vram-"+std::to_string(scanout.frames())+".bin"),std::ios::binary);   // both pages' pens, then the palette
+                    raw.write(reinterpret_cast<const char*>(video.vram.data()),std::streamsize(512*512*2));raw.write(reinterpret_cast<const char*>(video.palette_ram.data()),std::streamsize(video.palette_ram.size()*2));
                 }
                 if(accept_wide&&std::getenv("ACCEPT_DRAWS_FRAMES")&&(","+std::string(std::getenv("ACCEPT_DRAWS_FRAMES"))+",").find(","+std::to_string(scanout.frames())+",")!=std::string::npos){   // diagnostics
                     std::ofstream draws(std::getenv("ACCEPT_DRAWS_FILE")?std::getenv("ACCEPT_DRAWS_FILE"):"NUL",std::ios::app);
                     for(const auto& d:video.wide.placed_done)draws<<"draw "<<scanout.frames()<<" L"<<d.layer<<(d.fixed?" F":" W")<<" src "<<std::hex<<d.source<<" ctl "<<d.control<<std::dec<<" x "<<d.lo<<".."<<d.hi<<" y "<<d.row<<"+"<<d.rows<<char(10);}
+                if(accept_wide&&std::getenv("ACCEPT_PAGE_FRAMES")&&(","+std::string(std::getenv("ACCEPT_PAGE_FRAMES"))+",").find(","+std::to_string(scanout.frames())+",")!=std::string::npos){   // diagnostics: each page's build and who wrote its pixels (centre/margins by kind)
+                    const auto& l=video.wide;
+                    for(unsigned p=0;p<2;++p){unsigned kinds[2][7]={};
+                        for(size_t row=size_t(p)*256;row<size_t(p)*256+254;++row)for(int L=0;L<mk5wide::kLayerWidth;++L){const size_t at=row*mk5wide::kLayerWidth+size_t(L);
+                            ++kinds[l.Arcade(L)?0:1][l.written[at]>l.page_start[p]?size_t(l.origin[at].kind):0];}
+                        std::cerr<<"OUT page frame "<<scanout.frames()<<" page "<<p<<(p==l.page?"*":"")<<" builds "<<l.builds<<" dropped "<<l.dropped<<" whole "<<l.page_whole[p]<<" start "<<l.page_start[p]<<" cleared_at "<<l.page_cleared_at[p]<<" serial "<<l.serial<<" cleared "<<l.cleared[p]<<" soft "<<l.page_soft[p]<<" idle "<<l.idle<<" centre";
+                        for(unsigned k=0;k<14;++k)std::cerr<<(k==7?" margins ":" ")<<kinds[k/7][k%7];
+                        std::cerr<<char(10);}}
                 if(accept_wide&&std::getenv("ACCEPT_ROW_FRAMES")&&(","+std::string(std::getenv("ACCEPT_ROW_FRAMES"))+",").find(","+std::to_string(scanout.frames())+",")!=std::string::npos){   // diagnostics: who wrote a line's pixels
                     const auto& l=video.wide;std::string rows=std::getenv("ACCEPT_ROWS")?std::getenv("ACCEPT_ROWS"):"100";
                     for(size_t at=0;at<rows.size();at=rows.find(',',at)==std::string::npos?rows.size():rows.find(',',at)+1)for(unsigned p=0;p<2;++p){

@@ -116,6 +116,13 @@ centre does, and only there:
 - **The continue screen (MK1).** When a match is lost the game stops clearing the page and draws its countdown over the
   fight's last picture. If that fight ended near an arena's end, the wide picture keeps that last picture and its
   window while the camera stands (video RAM holds the arcade's window there, not the wide one).
+- **A build the game drops.** A build's margins stand beside its own picture. At the end of a demonstration shot MK2
+  resets its draw queue before the board has drawn it all (59 of 228 draws in the shot seen): for one frame video RAM
+  holds the far layers and nothing else, and the arcade shows that. The wide layer had already drawn the whole scene,
+  so up to v0.12.0 that frame showed the old scenery in the margins beside the arcade's bare picture. When a build
+  starts on a page the game has not cleared and the page's arcade columns are not what the layer has there, the
+  margins are masked with the build they belonged to (a build of the wide window's own picture cannot be compared:
+  it is taken as dropped when no display interrupt ended it).
 - **Free-camera arenas.** An arena without camera limits from its start stays centred.
 - **Attract demos.** The attract has one mode word for its demo fights and its other screens. A demo fight is told by
   two things: its camera limits are an arena's (not the ones the game gives a screen without an arena), and the last

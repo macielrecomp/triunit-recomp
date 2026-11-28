@@ -402,7 +402,7 @@ struct Layer {
     std::vector<Note> notes,notes_done;   // debug: this build's scenery draws, and the last finished build's
     std::vector<Placed> placed,placed_done;   // debug: this build's staged draws as placed, and the last finished build's
     MeasureCache shapes;   // the scenery draws MeasureBand keeps; not state
-    std::vector<Band> bands_done;unsigned builds=0;   // debug: the last frame's measured layers; builds started
+    std::vector<Band> bands_done;unsigned builds=0,dropped=0;   // debug: the last frame's measured layers; builds started; builds whose margins went with them (StartFrame)
     int shift_done=0;   // debug: the last finished build's window offset
     // A margin pixel of a band's line without the band's art, older than the band's first draw (the page clear's pen or a
     // farther layer: what the band would cover; a nearer one, a fighter or a projectile, stays), continues the line's art
@@ -640,11 +640,24 @@ struct Layer {
     // shadow's draws alone (an offset window: the continue screen over a fight that ended at an arena's end) then keeps
     // its picture and its window: VRAM has the arcade's window there, the layer the wide one, and the game draws over what
     // the page holds.
+    // A build's margins stand beside its own picture. The game can drop a build: it resets its queue before the board has
+    // drawn it all (a scene's last frame: the far layers and nothing else reach VRAM), and the page is shown so. On a
+    // page not cleared whose arcade columns are not what the layer has there, the margins are masked with that build; a
+    // build of the shadow's draws alone (its columns are not VRAM's) is taken as dropped when no display interrupt ended it.
     void StartFrame(unsigned page_row,const std::vector<uint16_t>& vram,const std::vector<Blood>& arcade_blood,bool still=false){
         page=(page_row>>8)&1;shift_done=shift;
         const bool keep=still&&!cleared[page]&&page_whole[page];
         if(keep){shift=page_shift[page];whole=true;}
-        else{PlainPage(page,vram,arcade_blood);page_shift[page]=shift=0;page_whole[page]=whole=false;}
+        else{
+            bool lost=!cleared[page]&&page_whole[page]&&builds!=ended;
+            for(size_t row=size_t(page)*256;row<size_t(page)*256+254&&!cleared[page]&&!page_whole[page]&&!lost;++row)
+                lost=!std::equal(pens.begin()+row*kLayerWidth+kWideMargin,pens.begin()+row*kLayerWidth+kWideMargin+kVisible,
+                                 vram.begin()+row*512+size_t(kWideMargin-kExtra));
+            for(size_t at=size_t(page)*256*kLayerWidth;lost&&at<(size_t(page)+1)*256*kLayerWidth;++at)
+                if(!Arcade(int(at%kLayerWidth)))fixed[at]|=kMask;
+            dropped+=lost;
+            PlainPage(page,vram,arcade_blood);page_shift[page]=shift=0;page_whole[page]=whole=false;
+        }
         cleared[page]=false;booked.fill(false);page_start[page]=serial;bands.clear();ending=-1;scene=false;arena=wider;wider=false;wide_lines=0;
         ++builds;if(debug){notes_done.swap(notes);notes.clear();placed_done.swap(placed);placed.clear();}
     }

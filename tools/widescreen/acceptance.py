@@ -48,7 +48,8 @@ def mk1(all_tapes):
     with q.scratch_tree() as (scratch,cleanup):
         srcs=[ROOT/'native/tests/mk5_widescreen_tests.cpp']+[ROOT/p for p in objects if Path(p).stem not in routes.EXCLUDE]
         exe,_=routes.build(scratch,srcs)
-        env={'PATH':str(q.DEFAULT_CC.parent)+os.pathsep+os.environ['PATH'],'TEMP':str(scratch),'TMP':str(scratch),'MK1_GAME_VOLUME':'0'}
+        env={'PATH':str(q.DEFAULT_CC.parent)+os.pathsep+os.environ['PATH'],'TEMP':str(scratch),'TMP':str(scratch),'MK1_GAME_VOLUME':'0',
+             **{k:v for k,v in os.environ.items() if k.startswith('WIDE_')}}   # the test's diagnostics (WIDE_TRACE, WIDE_DUMP_*)
         chosen=os.environ.get('ACCEPT_TAPES')   # a comma-separated subset (diagnostics)
         for name in chosen.split(',') if chosen else MK1_TAPES+(MK1_ALL if all_tapes else []):
             source=routes.HERE/'tapes'/f'{name}.json'

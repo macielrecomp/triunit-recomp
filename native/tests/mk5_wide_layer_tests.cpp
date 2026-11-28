@@ -7,6 +7,7 @@
 // next to it when it ends where they do.
 // The window's offset after a fight (mk5wide::Layer::Offset, Paused): it stays while the camera does, build after
 // build, and not across display interrupts without a build (another screen, whatever its camera).
+// A build the game drops (mk5wide::Layer::StartFrame): its margins stay only beside the picture it drew.
 #include "../include/mk5_wide.hpp"
 #include <cstdio>
 #include <stdexcept>
@@ -84,12 +85,29 @@ void offset(){
     paused.StartFrame(0,vram,{});
     need(paused.Offset(false,0,-80,4095,!paused.Paused())==0,"a build after display interrupts without one is centred, with the same camera");
 }
+// The next build starts on a page not cleared. VRAM's arcade columns hold what the last build drew there (the board drew
+// its whole queue): its margins stay; they hold less (the game dropped the queue first): the margins go with the build.
+void dropped(){
+    for(const bool drawn:{true,false}){
+        std::vector<uint16_t> vram(512*512,0);
+        Layer<uint16_t> l;l.Enable(vram,false);l.StartFrame(0,vram,{});l.fight=true;
+        l.Draw(Kind::shadow,0,W,0);
+        for(int y=kFirst;y<kFirst+kLines;++y)for(int L=0;L<W;++L){
+            l.Write(size_t(y)*W+size_t(L),kNear);
+            if(drawn&&L>=kExtra&&L<kExtra+512)vram[size_t(y)*512+size_t(L-kExtra)]=kNear;
+        }
+        l.StartFrame(0,vram,{});
+        for(int y=kFirst;y<kFirst+kLines;++y)for(int L=0;L<kWideMargin;++L)
+            need(l.Shown(size_t(y)*W+size_t(L))==drawn&&l.Shown(size_t(y)*W+size_t(W-1-L))==drawn,
+                 drawn?"a build's margins stay beside the picture it drew":"a dropped build's margins go with it");
+    }
+}
 }
 
 int main(){
-    try{check(false);check(true);texture();offset();}
+    try{check(false);check(true);texture();offset();dropped();}
     catch(const std::exception& error){std::printf("FAIL: %s\n",error.what());return 1;}
     std::printf("wide layer: a line goes on from its own art, flat and dithered, with and without a nearer layer over its ends; "
-                "the window's offset does not outlive a pause in the builds\n");
+                "the window's offset does not outlive a pause in the builds; a dropped build's margins go with it\n");
     return 0;
 }
