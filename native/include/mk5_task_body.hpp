@@ -92,6 +92,13 @@ class Mk5TaskBodyRunner {
     void guard()const;
     void pre(uint32_t pc);
     void step(uint32_t pc,uint32_t next,uint32_t cycles);
+    // The same for the main loop's shards (tools/mk1/generate.py, layout), which leave by return: true where pre and step
+    // throw TaskBodyStop::IrqHandler (an interrupt is entered hundreds of times a frame). interrupt_leave: a shard left so
+    // and the driver returns to ContinueMain (not state: it is false outside execute_main).
+    bool pre_interrupt(uint32_t pc);
+    bool step_interrupt(uint32_t pc,uint32_t next,uint32_t cycles);
+    bool interrupt_leave=false;
+    bool LeaveForInterrupt(){interrupt_leave=true;return true;}
     void nz(uint32_t value);void z(uint32_t value);
     void load(uint32_t& r,uint32_t v);void add(uint32_t& r,uint32_t v);void sub(uint32_t& r,uint32_t v);
     void compare(uint32_t a,uint32_t b);void shift(uint32_t& r,unsigned n,bool left);

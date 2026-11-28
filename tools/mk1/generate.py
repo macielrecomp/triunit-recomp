@@ -233,7 +233,10 @@ def layout(main,shards=MAIN_SHARDS):
     run by execute_main(). Returns {name: text}: mk5_main_loop_driver.inc, mk5_main_loop_shards.inc (declarations) and
     mk5_main_loop_shard_<k>.cpp. Labels and bodies are the graph's own, in order. A goto to a label of another shard
     returns to the driver: the step() before every goto already left that PC in s.next_original_pc (emit_graph jump),
-    so the driver's dispatch reaches the same label, as the graph's own `continuation` switch does."""
+    so the driver's dispatch reaches the same label, as the graph's own `continuation` switch does.
+    An interrupt is entered hundreds of times a frame: where the other graphs' pre() and step() throw
+    TaskBodyStop::IrqHandler, a shard returns (pre and step are the runner's pre_interrupt and step_interrupt there) and
+    the driver returns to ContinueMain."""
     lines=main.rstrip('\n').split('\n');first=next(i for i,l in enumerate(lines) if LABEL.fullmatch(l.split(' //')[0]))
     head,blocks=lines[:first],[]
     if head[1:3]!=['continuation:','switch(s.next_original_pc){'] or head[-2:]!=['default: throw TaskBodyStop::Untranslated;','}']:
@@ -250,10 +253,12 @@ def layout(main,shards=MAIN_SHARDS):
         if done>=size*len(groups)/shards and len(groups)<shards:groups.append([])
         groups[-1].append(block);done+=sum(len(l)+1 for l in block[1])
     note='// Generated offline by tools/mk1/generate.py from the main-loop graph (layout). Fixed native code.'
-    out={};driver=[note,'for(;;){','const uint32_t pc=s.next_original_pc;']
+    out={};driver=[note,'for(;;){','if(interrupt_leave)return;','const uint32_t pc=s.next_original_pc;']
     for k,group in enumerate(groups):
         own={pc for pc,_ in group}
         body=[note,'#include "mk5_task_body.hpp"','#include "mk5_audio_link.hpp"','#include <stdexcept>',
+              '#define pre(pc) if(pre_interrupt(pc))return LeaveForInterrupt()',
+              '#define step(pc,next,cycles) if(step_interrupt(pc,next,cycles))return LeaveForInterrupt()',
               f'template<> bool Mk5TaskBodyRunner::main_shard<{k}>(){{','const uint32_t entry=s.next_original_pc;',
               'continuation:','switch(s.next_original_pc){',*[f'case 0x{pc:08x}: goto pc_{pc:08x};' for pc in sorted(own)],
               'default: return s.next_original_pc!=entry;   // left this shard, or entered at a PC it does not hold','}']

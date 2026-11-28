@@ -30,15 +30,17 @@ void Mk5TaskBodyRunner::guard()const{
     if(!boot_mode && ((s.a[15]&15) || s.a[15]<0x010958b0 || s.a[15]>0x013fffe0))
         throw std::runtime_error("MK5 task-body: task stack outside guest RAM");
 }
-void Mk5TaskBodyRunner::pre(uint32_t pc){
-    if(shadow){shadow_pre(pc);return;}
+void Mk5TaskBodyRunner::pre(uint32_t pc){if(pre_interrupt(pc))throw TaskBodyStop::IrqHandler;}
+void Mk5TaskBodyRunner::step(uint32_t pc,uint32_t next,uint32_t cycles){if(step_interrupt(pc,next,cycles))throw TaskBodyStop::IrqHandler;}
+bool Mk5TaskBodyRunner::pre_interrupt(uint32_t pc){
+    if(shadow){shadow_pre(pc);return false;}
     // The real walk's first instruction after the shadow pass: counted and checked before the pass.
-    if(resume_walk && pc==mk5widescreen::kWalkStart){resume_walk=false;s.next_original_pc=pc;return;}
+    if(resume_walk && pc==mk5widescreen::kWalkStart){resume_walk=false;s.next_original_pc=pc;return false;}
     s.next_original_pc=pc;last_pre_pc=pc;++graph_steps;
     video_update();
     // A subroutine run and the quiet task-phase DI handler are one call/event
     // for the budget and the instruction history of the calling graph.
-    if(uncounted()){if(irq.CheckBoundary(pc))throw TaskBodyStop::IrqHandler;return;}
+    if(uncounted())return irq.CheckBoundary(pc);
     if(boot_mode){
         // The declared raster epoch begins at the first EINT of the reset path.
         if(pc==kFirstEint && !irq.Started())throw TaskBodyStop::Epoch;
@@ -50,7 +52,7 @@ void Mk5TaskBodyRunner::pre(uint32_t pc){
     if(!remaining)throw TaskBodyStop::Budget;
     if(pc==kMainLoop && main_mode){if(main_started)++result.main_loops;main_started=true;}
     --remaining;++result.instruction_count;
-    if(irq.CheckBoundary(pc))throw TaskBodyStop::IrqHandler;
+    if(irq.CheckBoundary(pc))return true;
     if(pc==mk5hitbox::kMk1.strike_pc)mk5hitbox::Strike(mk5hitbox::kMk1,s.a.data(),m.ram);   // training mode, read-only
     if((pc==0xffde7ad0 || pc==0xffc7a700 || pc==0xffc9f010 || pc==0xffca3d00) && video)
         video->ObserveBlood(pc,s);
@@ -66,6 +68,7 @@ void Mk5TaskBodyRunner::pre(uint32_t pc){
         break;
     }
     if(main_mode && video && video->WideEnabled())wide_pre(pc);
+    return false;
 }
 // Widescreen frame events of the real run, once per executed instruction (after every stop pre can raise).
 void Mk5TaskBodyRunner::wide_pre(uint32_t pc){
@@ -161,14 +164,14 @@ void Mk5TaskBodyRunner::shadow_failed(){
     shadow_window(w::kWalkStart);
     shadow_walk=true;s.next_original_pc=w::kWalkStart;
 }
-void Mk5TaskBodyRunner::step(uint32_t pc,uint32_t next,uint32_t cycles){
-    if(shadow){s.next_original_pc=next;return;}
+bool Mk5TaskBodyRunner::step_interrupt(uint32_t pc,uint32_t next,uint32_t cycles){
+    if(shadow){s.next_original_pc=next;return false;}
     if(!uncounted())result.instructions.push_back({pc,next,cycles});
-    if(immediate_irq){immediate_irq=false;irq.AdvanceCycles(cycles);video_update();throw TaskBodyStop::IrqHandler;}
+    if(immediate_irq){immediate_irq=false;irq.AdvanceCycles(cycles);video_update();return true;}
     s.next_original_pc=next;irq.AdvanceCycles(cycles);
     video_update();
     if(pc==0xffce2250 && !uncounted())++result.yields;
-    if(irq.CheckBoundary(pc))throw TaskBodyStop::IrqHandler;
+    return irq.CheckBoundary(pc);
 }
 void Mk5TaskBodyRunner::z(uint32_t v){s.status=(s.status&~uint32_t(0x20000000))|(v?0:0x20000000);}
 void Mk5TaskBodyRunner::nz(uint32_t v){s.status=(s.status&~uint32_t(0xb0000000))|(v&0x80000000);z(v);}
