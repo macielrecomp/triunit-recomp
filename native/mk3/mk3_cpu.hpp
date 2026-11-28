@@ -21,6 +21,10 @@ inline const std::vector<uint8_t> kNoGraphics;   // runs without the graphics RO
 struct CpuVramObserver {
     virtual ~CpuVramObserver() = default;
     virtual void CpuVram(uint32_t pc, size_t word, uint16_t value, uint16_t mask, uint64_t cycle) = 0;
+    // `count` whole words one instruction stored in a row (a shift-register transfer): as that many CpuVram calls.
+    virtual void CpuVramRun(uint32_t pc, size_t word, size_t count, const uint16_t* values, uint64_t cycle) {
+        for (size_t k = 0; k < count; ++k) CpuVram(pc, word + k, values[k], 0xffff, cycle);
+    }
 };
 // Fixed-translation primitives for blocks emitted by tools/mk3/generate.py (MK2 emitter semantics,
 // costs from the pinned tms34010 model). Wolf-Unit bus: main RAM, CMOS with write enable, program ROM.
@@ -343,7 +347,7 @@ public:
         if (word + shiftreg.size() > vram.size()) Reject("shift-register transfer outside VRAM", address);
         if (to_vram) {
             std::copy(shiftreg.begin(), shiftreg.end(), vram.begin() + ptrdiff_t(word));
-            if (vram_observer) for (size_t k = 0; k < shiftreg.size(); ++k) vram_observer->CpuVram(instruction_pc, word + k, vram[word + k], 0xffff, instruction_cycles);
+            if (vram_observer) vram_observer->CpuVramRun(instruction_pc, word, shiftreg.size(), vram.data() + word, instruction_cycles);
         } else std::copy_n(vram.begin() + ptrdiff_t(word), shiftreg.size(), shiftreg.begin());
     }
     uint32_t ReadPixel(uint32_t address) {  // RPIXEL

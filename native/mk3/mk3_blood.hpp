@@ -56,6 +56,7 @@ struct FloorBlood {
     uint16_t Pen(size_t i) const { return pens.empty() ? 0 : pens[i]; }
     uint8_t Floor(size_t i) const { return floor.empty() ? 0 : floor[i]; }
     void Mask(size_t i) { if (!layer.empty()) layer[i] = 0; }
+    void Mask(size_t i, size_t n) { if (!layer.empty()) std::fill_n(layer.begin() + ptrdiff_t(i), n, uint16_t(0)); }
     void Clear() {
         staged.clear(); stains.clear(); pass.cursor = 0;
         std::fill(layer.begin(), layer.end(), uint16_t(0)); std::fill(pens.begin(), pens.end(), uint16_t(0));

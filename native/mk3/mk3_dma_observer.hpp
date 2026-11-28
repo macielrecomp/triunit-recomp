@@ -276,6 +276,18 @@ struct DmaLayers : DmaObserver {
         if (i != cpu_end) { Flush(); cpu_begin = i; }
         cpu_end = i + 1;
     }
+    // n words stored in a row by one instruction, as n Cpu calls: a run that does not follow the pending one is flushed
+    // with its first word stored and no more, as Cpu flushes it.
+    void CpuRun(uint32_t pc, size_t i, size_t n, const uint16_t* v) {
+        if (!n) return;
+        const bool picture = pc == kPictureRows[0] || pc == kPictureRows[1] || pc == kPictureRows[2];
+        const DmaClass c = pc == kPageFill || picture ? DmaClass::Scenery : DmaClass::Cpu;
+        if (i != cpu_end) { stored[i] = under[i] = v[0]; cls[i] = uint8_t(c); Flush(); cpu_begin = i; }
+        std::copy_n(v, n, stored.begin() + ptrdiff_t(i)); std::copy_n(v, n, under.begin() + ptrdiff_t(i));
+        std::fill_n(cls.begin() + ptrdiff_t(i), n, uint8_t(c)); cpu_words[picture ? 2 : c == DmaClass::Scenery] += n;
+        blood.Mask(i, n);
+        cpu_end = i + n;
+    }
     void Flush() {   // CPU stores become opaque base pens (one ClearWith per contiguous run)
         if (cpu_end == cpu_begin) return;
         fighters.ClearWith(cpu_begin, cpu_end - cpu_begin, [this](size_t k) {

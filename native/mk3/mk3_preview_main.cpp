@@ -150,6 +150,7 @@ struct Census : mk3::DmaObserver {
 struct CpuTap : mk3::CpuVramObserver {
     mk3::DmaLayers* layers = nullptr;
     void CpuVram(uint32_t pc, size_t word, uint16_t value, uint16_t, uint64_t) override { layers->Cpu(pc, word, value); }
+    void CpuVramRun(uint32_t pc, size_t word, size_t count, const uint16_t* values, uint64_t) override { layers->CpuRun(pc, word, count, values); }
 };
 // Widescreen diagnostics (mk5wide::Layer::debug), per finished build from its scenery draws (mk5wide::Note):
 // parallax: for each scenery layer whose list camera moved and whose centre draws moved by minus that amount, the most
@@ -538,15 +539,17 @@ int wmain(int argc, wchar_t** argv) {   // -municode (generate.FLAGS): wide argu
                     if (widescreen) {
                         const auto& au = s.wide_audit; const auto& l = wide->layer;
                         wide_checks.Frame(l);
+                        static mk5wide::Flash wide_flash;
                         std::printf(",\"checks\":[%llu,%llu,%llu,%llu]", (unsigned long long)wide_checks.parallax_checked, (unsigned long long)wide_checks.parallax_differ,
                                     (unsigned long long)wide_checks.still_checked, (unsigned long long)wide_checks.still_moved);
                         std::printf(",\"wide\":{\"centre\":%llu,\"filled\":%llu,\"shift\":%d,\"whole\":%d,\"soft\":%d,\"audit\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu],"
-                                    "\"faults\":%llu,\"fault_pc\":%u,\"skips\":%llu,\"passes\":%llu,\"fight\":%d,\"arena\":%d,\"open\":%d,\"hand\":%d,\"rgb\":\"%016llx\",\"bands\":[",
+                                    "\"faults\":%llu,\"fault_pc\":%u,\"skips\":%llu,\"passes\":%llu,\"fight\":%d,\"arena\":%d,\"open\":%d,\"hand\":%d,\"rgb\":\"%016llx\",\"flash\":%u,\"bands\":[",
                                     (unsigned long long)s.wide_centre, (unsigned long long)s.wide_filled, s.wide_shift, int(s.wide_whole), int(s.wide_soft),
                                     (unsigned long long)au.shown, (unsigned long long)au.sentinel, (unsigned long long)au.masked, (unsigned long long)au.outside,
                                     (unsigned long long)au.outside_real, (unsigned long long)au.generated, (unsigned long long)au.stale,
                                     (unsigned long long)wide->faults, unsigned(wide->fault_pc), (unsigned long long)wide->streamer_skips,
-                                    (unsigned long long)wide->passes, int(l.fight), int(l.arena), int(l.open), int(wide->hand), (unsigned long long)HashRgb(s.wide_presentation));
+                                    (unsigned long long)wide->passes, int(l.fight), int(l.arena), int(l.open), int(wide->hand), (unsigned long long)HashRgb(s.wide_presentation),
+                                    wide_flash.Feed(s.wide_presentation, mk3::Scanout::kWideWidth, mk3::Scanout::kFrameHeight));   // flash: of the frame before (mk5wide::Flash)
                         // Each measured scenery layer of the last build: the margin columns its art covers at the least.
                         for (size_t k = 0; k < l.bands_done.size(); ++k) {
                             int left = mk5wide::kWideMargin, right = mk5wide::kWideMargin;

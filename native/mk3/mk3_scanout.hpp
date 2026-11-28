@@ -60,6 +60,16 @@ struct Scanout {
     std::vector<uint16_t> row_floor_pen = std::vector<uint16_t>(kWidth);
     std::vector<uint8_t> row_floor = std::vector<uint8_t>(kWidth);
     static constexpr uint32_t kSceneryRgb = 0x80000000u;   // mk5stage::scenery
+    // Rgb of every palette entry as the last Present saw the palette (not state), and 0 at kBlackPen.
+    std::vector<uint16_t> rgb_palette;
+    std::vector<uint32_t> colours = std::vector<uint32_t>(size_t(kBlackPen) + 1);
+    const uint32_t* Colours(const std::vector<uint16_t>& palette) {
+        if (rgb_palette != palette) {
+            rgb_palette = palette;
+            for (size_t i = 0; i < size_t(kBlackPen) && i < palette.size(); ++i) colours[i] = Rgb(palette[i]);
+        }
+        return colours.data();
+    }
 
     // Widescreen (mk3_wide.hpp, Remastered presentation): each visible line also takes its line of the 16:9 layer, the
     // arcade's 400 columns at its centre, as pen codes resolved through the VBLANK palette like the frame. A line whose
@@ -144,7 +154,7 @@ struct Scanout {
         }
         if (have) layer.AuditRow(wide_audit_work, unsigned(row_base >> 9));
     }
-    void PresentWide(const std::vector<uint16_t>& palette, const mk5blood::Shade& shade) {
+    void PresentWide(const mk5blood::Shade& shade) {
         bool soft = false;
         unsigned dim = 0;   // 0: not measured yet
         const auto faded = [&](unsigned c) {
@@ -154,7 +164,7 @@ struct Scanout {
         for (size_t i = 0; i < wide_pens.size(); ++i) {
             const uint32_t code = wide_pens[i] & ~kWideSoftFlag;
             soft |= code != wide_pens[i];
-            wide_frame[i] = 0xff000000u | (code < 0x8000 ? Rgb(palette[code]) : (code & 0xf0000) == kWideColour ? Rgb(faded(code & 0x7fff)) : code == kWideSentinel ? 0xff00ffu : 0u);
+            wide_frame[i] = 0xff000000u | (code < 0x8000 ? colours[code] : (code & 0xf0000) == kWideColour ? Rgb(faded(code & 0x7fff)) : code == kWideSentinel ? 0xff00ffu : 0u);
         }
         // A far backdrop's soft sides (mk3::Wide::SoftBackdrop): per margin and line the average colour of its soft
         // pixels (the line's last columns), blurred over kSoftRows lines up and down among the lines that have them, and
@@ -270,11 +280,14 @@ struct Scanout {
                 uint32_t* back = &backdrop_pens[size_t(top) * kWidth];
                 const size_t base = (rowaddr << 9) & 0x3fe00;
                 std::fill(row_blood.begin(), row_blood.end(), uint16_t(0));
+                // A stain's floor is read where there is one (a byte store in the loop makes every vector be read again).
                 for (int x = heblnk, c = int(col); x < hsblnk; ++x, ++c) {
                     back[x] = layers->Backdrop(base + (c & 0x1ff), src[c & 0x1ff]);
-                    row_blood[x] = layers->blood.At(base + (c & 0x1ff)); row_floor_pen[x] = layers->blood.Pen(base + (c & 0x1ff));
-                    row_floor[x] = layers->blood.Floor(base + (c & 0x1ff));
+                    row_blood[x] = layers->blood.At(base + (c & 0x1ff));
                     if (row_blood[x]) back[x] = FloorBlood::kMark | (row_blood[x] & 0x7fffu);
+                }
+                for (int x = heblnk, c = int(col); x < hsblnk; ++x, ++c) if (row_blood[x]) {
+                    row_floor_pen[x] = layers->blood.Pen(base + (c & 0x1ff)); row_floor[x] = layers->blood.Floor(base + (c & 0x1ff));
                 }
             }
             for (int x = heblnk; x < hsblnk; ++x) dest[x] = src[col++ & 0x1ff] & 0x7fff;
@@ -289,13 +302,24 @@ struct Scanout {
             if (!enabled) std::fill(row_blood.begin(), row_blood.end(), uint16_t(0));
             if (presentation_pens.empty()) presentation_pens.assign(frame.size(), kBlackPen);
             if (presentation_floor.empty()) { presentation_floor_pen.assign(frame.size(), 0); presentation_floor.assign(frame.size(), 0); }
+            const size_t line = size_t(top - kTop) * kFrameWidth;
+            const uint16_t* stains = row_blood.data() + kLeft;
+            const uint16_t* floor_pens = row_floor_pen.data() + kLeft;
+            const uint8_t* floors = row_floor.data() + kLeft;
+            const uint16_t* shown = dest + kLeft;
+            const uint32_t* behind = back + kLeft;
+            uint32_t* out_pens = row_pens.data();
+            uint32_t* out_back = row_back.data();
+            uint32_t* kept_pens = presentation_pens.data() + line;
+            uint16_t* kept_floor_pens = presentation_floor_pen.data() + line;
+            uint8_t* kept_floors = presentation_floor.data() + line;
             for (int x = 0; x < kFrameWidth; ++x) {
-                const uint16_t stain = row_blood[x + kLeft];
-                row_pens[x] = stain ? FloorBlood::kMark | (stain & 0x7fffu) : dest[x + kLeft];
-                row_back[x] = stain ? row_pens[x] : (back[x + kLeft] & 0xffff) | (back[x + kLeft] & DmaLayers::kScenery ? kSceneryRgb : 0);
-                presentation_pens[size_t(top - kTop) * kFrameWidth + x] = row_pens[x];
-                presentation_floor_pen[size_t(top - kTop) * kFrameWidth + x] = stain ? row_floor_pen[x + kLeft] : uint16_t(0);
-                presentation_floor[size_t(top - kTop) * kFrameWidth + x] = stain ? row_floor[x + kLeft] : uint8_t(0);
+                const uint16_t stain = stains[x];
+                const uint32_t pen = stain ? FloorBlood::kMark | (stain & 0x7fffu) : shown[x];
+                out_pens[x] = kept_pens[x] = pen;
+                out_back[x] = stain ? pen : (behind[x] & 0xffff) | (behind[x] & DmaLayers::kScenery ? kSceneryRgb : 0);
+                kept_floor_pens[x] = stain ? floor_pens[x] : uint16_t(0);
+                kept_floors[x] = stain ? floors[x] : uint8_t(0);
             }
             layers->Flush();
             fighter_work.Line(layers->fighters, unsigned(top - kTop), row_base, row_col, row_pens.data(), row_back.data(),
@@ -306,11 +330,9 @@ struct Scanout {
 
     // vblank_begin -> frame_update: the visible area through the palette (xRGB_555, pal5bit expansion).
     void Present(const std::vector<uint16_t>& palette) {
+        const uint32_t* colour = Colours(palette);   // a pen is a palette entry or kBlackPen
         for (int y = 0; y < kFrameHeight; ++y)
-            for (int x = 0; x < kFrameWidth; ++x) {
-                const uint16_t pen = pens[size_t(y + kTop) * kWidth + size_t(x + kLeft)];
-                frame[size_t(y) * kFrameWidth + x] = pen == kBlackPen ? 0 : Rgb(palette[pen]);
-            }
+            for (int x = 0; x < kFrameWidth; ++x) frame[size_t(y) * kFrameWidth + x] = colour[pens[size_t(y + kTop) * kWidth + size_t(x + kLeft)]];
         mk5blood::Shade shade;
         if (layers) {
             if (backdrop_pens.empty()) backdrop_pens.assign(pens.size(), kBlackPen);
@@ -321,7 +343,7 @@ struct Scanout {
                 if (presentation_pens[i] & FloorBlood::kMark) shade.Cover(presentation_floor_pen[i], presentation_floor[i], palette.data());
             const auto rgb = [&](uint32_t pen) {
                 return pen & FloorBlood::kMark ? Rgb(mk5blood::Dim(uint16_t(pen & 0x7fff), shade.now, shade.then))
-                                               : (pen & 0xffff) == kBlackPen ? 0 : Rgb(palette[pen & 0x7fff]);
+                                               : (pen & 0xffff) == kBlackPen ? 0 : colour[pen & 0x7fff];
             };
             presentation.resize(frame.size());
             for (size_t i = 0; i < frame.size(); ++i) presentation[i] = rgb(presentation_pens[i]);
@@ -338,7 +360,7 @@ struct Scanout {
                 for (auto& l : fighters.layers) for (auto& v : l.pixels) if (v >> 24) v = 0xff000000u | rgb(v);
             }
         }
-        if (wide) PresentWide(palette, shade);
+        if (wide) PresentWide(shade);
         ++frames;
         if (presented) presented(*this);
     }

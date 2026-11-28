@@ -202,6 +202,14 @@ struct Wide : DmaObserver, CpuVramObserver {
     // the game has just wiped), takes the shadow's draws with it: the real ones are then mirrored as they come.
     void CpuVram(uint32_t pc, size_t word, uint16_t value, uint16_t mask, uint64_t cycle) override {
         if (next_cpu) next_cpu->CpuVram(pc, word, value, mask, cycle);
+        Stored(pc, word);
+    }
+    // The next observer takes the run whole: it keeps nothing the layer reads here.
+    void CpuVramRun(uint32_t pc, size_t word, size_t count, const uint16_t* values, uint64_t cycle) override {
+        if (next_cpu) next_cpu->CpuVramRun(pc, word, count, values, cycle);
+        for (size_t k = 0; k < count; ++k) Stored(pc, word + k);
+    }
+    void Stored(uint32_t pc, size_t word) {
         if (!layer.Enabled()) return;
         const auto wiped = [&](size_t first) { if (((first >> 17) & 1) == layer.page) walk_drawn = false; };
         if (pc != wide::kPageFill) {
