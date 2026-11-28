@@ -15,6 +15,13 @@ constexpr uint32_t kMarker=0xff804f60,kDrain=0xff804630;
 constexpr uint32_t kKick=0xff804440,kKickEnd=0xff804510;
 // Staging MMTMs: the list drawer (A12 A11 A10 A9 A8 A6 as r0/r1..r10/r11) and the floor producer (A9 A8 A7 A6 A3 A2).
 constexpr uint32_t kDrawerStage=0xff804410,kFloorStage=0xff800490;
+// The floor producer (FF800000) keeps its own place: each frame its x long (16.16, minus the scroll) loses the velocity long
+// that kFloorVelocity points at (a scroll slot's), and the arena's perspective routine (the long at kFloorRoutine, one of
+// kFloorPerspective) takes that velocity shifted right by its own count (its SRA) from the long that each floor line
+// adds to the x of the line before it.
+constexpr uint32_t kFloorX=0x0105ec00,kFloorSlope=0x0105ebe0,kFloorVelocity=0x0105ecb0,kFloorRoutine=0x0105ec70;
+struct FloorRoutine{uint32_t pc;unsigned shift;};
+constexpr FloorRoutine kFloorPerspective[]={{0xff9fe770,7},{0xff9ffa50,7},{0xffa026f0,7},{0xffa047a0,7},{0xffa04e50,7},{0xffa07850,8},{0xffa08f10,7}};
 // Scenery streamer: entry, the return of its only call, and the object pool resets that end its planes.
 constexpr uint32_t kStreamer=0xff9f8030,kStreamerReturn=0xff9f7fe0,kPoolReset[2]={0xff808990,0xff83f160};
 struct Range {uint32_t from,to;};

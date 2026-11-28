@@ -470,6 +470,7 @@ def fast(cc, sanitizer, scratch, graphics=False):
              ["-municode", *["-l"+name for name in ("d3d12","dxgi","d3dcompiler","dxguid","windowscodecs","ole32","uuid","gdi32","user32","shell32","xinput9_1_0")]]+backend_arguments(ROOT), [str(ROOT), str(scratch / "art-render-root"), "render"]),
         ]
     else:
+        cases.append(("wide-layer", ["native/tests/mk5_wide_layer_tests.cpp"], [], []))
         mk2_roms = ROOT / "roms/mk2"
         mk2_manifest = json.loads((ROOT / "tools/mk2/roms-l31.json").read_text(encoding="utf-8"))
         if all((mk2_roms / row["path"]).is_file() for row in mk2_manifest["roms"] if row["region"] != "dcs"):

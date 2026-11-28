@@ -148,6 +148,10 @@ struct Mk5Window::Impl {
     mk5controls::Config controls;std::array<mk5controls::Socd,2> socd{};
     mutable std::atomic<unsigned> controller_count{0};
     std::mutex stats_mutex;mk5timing::Stats producer_timing,display_timing,prepare_timing;
+    // The producer's own work per frame (from one Present's end to the next one's start: the game, its audio, its inputs)
+    // and the frames that reached Present after their deadline. A frame's work over the native 18.28 ms is a late frame
+    // whatever the display does.
+    mk5timing::Stats work_timing;LONGLONG work_from=0;uint64_t late_frames=0;bool producer_raised=false;
     bool bezel=true,fullscreen=true,legacy_pacing=false,high_refresh=false,tearing=false,immediate_headroom=false;
     unsigned across=4,down=3;   // the frame's physical aspect (Mk5Window)
     int sync_mode=1,color_mode=0,brightness=100;
@@ -1239,6 +1243,11 @@ void Mk5Window::Present(const std::vector<uint32_t>& pixels,unsigned width,unsig
     impl->check_failure();if(!impl->running)return;
     if(!width || !height || pixels.size()!=size_t(width)*height)throw std::runtime_error("MK5 window requires complete RGB frame");
     if(!backdrop.empty()&&backdrop.size()!=pixels.size())throw std::runtime_error("MK5 window requires complete backdrop frame");
+    // The game's thread runs a step above normal: the picture's workers and the rest of the desktop do not hold a frame.
+    if(!impl->producer_raised){impl->producer_raised=true;SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_ABOVE_NORMAL);}
+    {LARGE_INTEGER entry{};QueryPerformanceCounter(&entry);std::lock_guard<std::mutex> lock(impl->stats_mutex);
+        if(impl->work_from&&impl->frames>=60){impl->work_timing.duration(uint64_t(entry.QuadPart-impl->work_from),uint64_t(impl->frequency));
+            impl->late_frames+=impl->next_due&&entry.QuadPart>impl->next_due;}}
     if(!(impl->legacy_pacing&&mk5audio::GameAudioUsesOutputClock())){
     // Native raster clock, independent of audio packet boundaries. Never skip guest work.
     LARGE_INTEGER now{};QueryPerformanceCounter(&now);
@@ -1275,6 +1284,7 @@ void Mk5Window::Present(const std::vector<uint32_t>& pixels,unsigned width,unsig
         }
     }
     LARGE_INTEGER stamp{};QueryPerformanceCounter(&stamp);{std::lock_guard<std::mutex> lock(impl->stats_mutex);if(impl->frames>=60)impl->producer_timing.observe(stamp.QuadPart,impl->frequency);}
+    impl->work_from=stamp.QuadPart;
     ++impl->frames;SetEvent(impl->compose_wake?impl->compose_wake:impl->wake);
 }
 void Mk5Window::Frontier(uint32_t pc){if(impl->hwnd)PostMessageW(impl->hwnd.load(),kFrontier,pc,0);}
@@ -1285,7 +1295,7 @@ uint64_t Mk5Window::input_events()const{return impl->events;}
 bool Mk5Window::GraphicsValidationEnabled()const{return impl->validate_graphics;}
 std::string Mk5Window::presentation_json()const{
     std::lock_guard<std::mutex> lock(impl->stats_mutex);
-    std::ostringstream s;s<<"{\"renderer\":\"D3D12-DXGI-flip\",\"vsync\":"<<((impl->sync_mode==0||!impl->tearing||impl->exclusive)?"true":"false")<<",\"sync_requested\":"<<impl->sync_mode<<",\"tearing_supported\":"<<(impl->tearing?"true":"false")<<",\"vrr_driver_monitor_verified\":false,\"fullscreen_start\":"<<(impl->fullscreen?"true":"false")<<",\"bezel\":"<<(impl->bezel?"true":"false")<<",\"color_mode\":"<<impl->color_mode<<",\"brightness\":"<<impl->brightness<<",\"gamepads_connected\":"<<impl->controller_count<<",\"gamepad_poll_ms\":4,\"native_frame_ms\":18.27925,\"high_refresh\":"<<(impl->high_refresh?"true":"false")<<",\"run_ahead\":\""<<(!impl->controls.runAhead?"off":impl->ahead_stopped?"stopped":"on")<<"\""<<",\"audio_reserve_percent\":"<<mk5audio::output_reserve_percent.load()<<",\"repeated_frames\":"<<impl->repeats<<",\"producer_intervals\":"<<impl->producer_timing.json()<<",\"present_call_intervals\":"<<impl->display_timing.json()<<",\"ui_thread_isolated\":true,\"exclusive\":"<<(impl->exclusive?"true":"false")
+    std::ostringstream s;s<<"{\"renderer\":\"D3D12-DXGI-flip\",\"vsync\":"<<((impl->sync_mode==0||!impl->tearing||impl->exclusive)?"true":"false")<<",\"sync_requested\":"<<impl->sync_mode<<",\"tearing_supported\":"<<(impl->tearing?"true":"false")<<",\"vrr_driver_monitor_verified\":false,\"fullscreen_start\":"<<(impl->fullscreen?"true":"false")<<",\"bezel\":"<<(impl->bezel?"true":"false")<<",\"color_mode\":"<<impl->color_mode<<",\"brightness\":"<<impl->brightness<<",\"gamepads_connected\":"<<impl->controller_count<<",\"gamepad_poll_ms\":4,\"native_frame_ms\":18.27925,\"high_refresh\":"<<(impl->high_refresh?"true":"false")<<",\"run_ahead\":\""<<(!impl->controls.runAhead?"off":impl->ahead_stopped?"stopped":"on")<<"\""<<",\"audio_reserve_percent\":"<<mk5audio::output_reserve_percent.load()<<",\"repeated_frames\":"<<impl->repeats<<",\"producer_intervals\":"<<impl->producer_timing.json()<<",\"producer_work_ms\":"<<impl->work_timing.json()<<",\"late_frames\":"<<impl->late_frames<<",\"present_call_intervals\":"<<impl->display_timing.json()<<",\"ui_thread_isolated\":true,\"exclusive\":"<<(impl->exclusive?"true":"false")
       <<",\"submitted_frames\":"<<impl->frames<<",\"displayed_frames\":"<<impl->displayed<<",\"coalesced_host_frames\":"<<impl->coalesced
       <<",\"frame_queue_limit\":"<<impl->frame_queue_limit
       <<",\"frame_preparation_ms\":"<<impl->prepare_timing.json()

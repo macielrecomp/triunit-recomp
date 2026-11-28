@@ -76,6 +76,11 @@ void Mk5TaskBodyRunner::wide_pre(uint32_t pc){
     case w::kDisplayIrq:v.WideEndUnbuilt();return;
     case w::kBuilder:v.WideFrame(ram_long(w::kPageOrigin)>>16&0x1ff,int16_t(word(w::kCameraX))==v.WideLayerState().held[0]);return;   // after the page clear
     case w::kStreamer:v.wide_streaming=true;return;
+    case w::kWrapTest:{   // a wrapping group (A8): its parts and the ring's length, from the MOVI's immediate
+        const int length=int(rom32(p,w::kWrapLength)&0xffff);uint32_t part=s.a[8];
+        for(unsigned n=0;n<w::kWrapParts && part>=0x01000000 && part<0x01400000 && !(part&15);++n){v.WideWrap(part,length);part=ram_long(part+w::kPartLink);}
+        return;
+    }
     case w::kStreamerEnd:v.wide_streaming=false;return;
     case w::kWalkEnd:v.WideRealWalk(false);return;
     case w::kWalkStart:break;
@@ -89,8 +94,8 @@ void Mk5TaskBodyRunner::wide_pre(uint32_t pc){
     const int camera=int16_t(word(w::kCameraX));const auto& layer=v.WideLayerState();
     v.WideOffset(w::Shifting(mode)||w::Demo(mode,low,high,layer.arena,layer.fight,camera==layer.held[0]),camera,low,high,mode!=w::kAttractMode);
     // A moving world updates each plane's ratio (its velocity over the world's).
-    if(const auto world_velocity=int32_t(ram_long(w::kWorldScroll-w::kVelocityGap)))for(unsigned slot=0;slot<w::kScrollSlots;++slot)
-        v.WideRatio(slot)=mk5wide::MeasuredRatio(int32_t(ram_long(w::kScrollFirst+slot*0x20-w::kVelocityGap)),world_velocity);
+    for(unsigned slot=0;slot<w::kScrollSlots;++slot)
+        v.WideLayerState().Velocity(slot,int32_t(ram_long(w::kScrollFirst+slot*0x20-w::kVelocityGap)),int32_t(ram_long(w::kWorldScroll-w::kVelocityGap)));
     shadow_a=s.a;shadow_b=s.b;shadow_status=s.status;shadow_returns=f.check.returns.size();shadow_writes=s.writes.size();
     shadow_stack_reads=f.check.stack_read_count;shadow_lowest_sp=f.check.lowest_sp;shadow_quanta=irq.elapsed_quanta();
     shadow_cycles=s.reference_cycles;shadow_steps=0;shadow_journal.clear();shadow=true;shadow_refused=false;

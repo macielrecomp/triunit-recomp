@@ -242,7 +242,12 @@ int Mk5BootFlowCli(int argc,wchar_t** argv,bool remastered,Mk5StateHost host){
                         main=runner.ContinueMain(o.body,o.main_di_limit);main_executed=true;++main_calls;main_cycles+=main.reference_cycles;main_instructions+=main.instruction_count;main_yields+=main.yields;main_loops+=main.main_loops;
                         if(o.visual && main.stop==TaskBodyStop::DecompressorComplete){window=std::move(prepared_window);window->TakeStateRequests();/* drop keys pressed while loading */o.body.stop_after_decompression=false;o.body.instruction_budget=10000;shown_frame=screen->frames();continue;}
                         if(window && screen->frames()>shown_frame){
-                            if(live_status.Enabled()){
+                            // A bounded run (a test) keeps every frame's status; a session rewrites the file ten times a
+                            // second (its reader samples it four times a second): a file write per frame is the game's thread
+                            // waiting on the disk.
+                            static ULONGLONG status_at=0;const ULONGLONG status_now=GetTickCount64();
+                            if(live_status.Enabled() && (o.window_frames || status_now-status_at>=100)){
+                                status_at=status_now;
                                 auto word=[&](uint32_t address){return m.ram.at((address-0x01000000u)/16);};
                                 auto wide=[&](uint32_t address){return uint32_t(word(address))|(uint32_t(word(address+16))<<16);};
                                 auto life=[&](unsigned player){return std::max(0,int(int16_t(word(player?0x010515e0:0x01051300)))-int(int16_t(word(player?0x010515f0:0x01051310))));};

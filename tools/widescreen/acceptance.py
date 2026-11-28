@@ -14,6 +14,10 @@ TRIUNIT_WIDE_DEBUG), and checks:
   5. each scenery layer moves by the same columns per frame in the margins as in the centre;
   6. MK1 and MK3: with the camera still, every scenery list's camera is still;
   7. MK1 and MK3: no fight frame with a lit picture masks more than a speck of its margins (a black bar or block over a sky);
+ 12. MK1: far planes move at an even pace between the arcade's views of them at the arena's camera limits;
+ 13. MK2: the floor stands while the arcade's camera moves under a wide camera standing on its limit;
+ 14. MK2: a far object the game parked off its screen flies on out of the margin (the replays must reach one);
+ 15. MK2: no far object's flight starts or ends inside the wide picture;
 all of it for MK1, MK2 and MK3 (--all adds the long replays that visit every arena).
 It prints the edge coverage table (per arena and scenery layer: the fewest margin columns its art covered) and exits 1 on
 any failure. Needs the authenticated ROMs and the setup's generated code; nothing is written outside a temporary tree."""
@@ -24,7 +28,8 @@ sys.path.insert(0,str(ROOT))
 from tools.quality import run as q
 
 MK1_TAPES=['versus-walls','versus-corner-win','versus-jumps']   # both walls of an arena; a fight won near the right end; diagonal jumps wall to wall
-MK1_ALL=['campaign-prefix']
+MK1_ALL=['campaign-prefix','bonus','demos']   # tools/widescreen/mk1_tapes.py: five versus wins and the bonus stage; the attract's demo fights
+MK1_MADE={'bonus':lambda t:t.bonus(230),'demos':lambda t:t.demos()}   # 230 patterns pass the fifth win and the bonus stage after it
 
 
 def table(title,rows):
@@ -46,7 +51,11 @@ def mk1(all_tapes):
         env={'PATH':str(q.DEFAULT_CC.parent)+os.pathsep+os.environ['PATH'],'TEMP':str(scratch),'TMP':str(scratch),'MK1_GAME_VOLUME':'0'}
         chosen=os.environ.get('ACCEPT_TAPES')   # a comma-separated subset (diagnostics)
         for name in chosen.split(',') if chosen else MK1_TAPES+(MK1_ALL if all_tapes else []):
-            tape=scratch/f'{name}.tsv';tape.write_bytes(routes.render_tape(routes.HERE/'tapes'/f'{name}.json'))
+            source=routes.HERE/'tapes'/f'{name}.json'
+            if name in MK1_MADE:
+                from tools.widescreen import mk1_tapes
+                source=scratch/f'{name}.json';mk1_tapes.write(source,MK1_MADE[name](mk1_tapes))
+            tape=scratch/f'{name}.tsv';tape.write_bytes(routes.render_tape(source))
             r=q.command([exe,ROOT,tape,seed],scratch,cwd=ROOT,env=env,timeout=7200,output_limit=1<<20)
             lines=[l for l in r['stdout'].splitlines() if l.startswith('{')]
             result=json.loads(lines[-1]) if lines else {}
@@ -54,6 +63,7 @@ def mk1(all_tapes):
             for line in ((r.get('stderr') or '')+r['stdout']).splitlines():
                 if line.startswith('parallax'):print('  ',line)
             if not r['passed']:failures.append(f'MK1 {name}: '+(r.get('stderr') or r['stdout'])[-800:].strip())
+            if name=='demos' and not result.get('ring'):failures.append('MK1 demos: no copy of a wrapping far-plane part was staged (the ring of clouds was never reached)')
             if result.get('coverage'):table(f'MK1 {name}: edge coverage',result['coverage'])
     assert not cleanup['exists_after']
     return failures

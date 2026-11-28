@@ -59,6 +59,13 @@ class Mk5LiveVideo {
     // (wide_plane) so the layer's art is measured whole (mk5wide::MeasureBand).
     bool wide_hud=false;int wide_layer=0;int16_t wide_camera=0;int wide_slot=-1;   // the waiting list's camera x and far plane slot (-1: none)
     std::vector<WideEntry> wide_plane;
+    // The parts of the far-plane groups the game wraps around a ring (mk5widescreen::kWrapTest): each one's ring length
+    // and the frame its group was last tested (every 8 frames; a part not tested for kWrapKeep frames is forgotten).
+    struct WideWrapPart{uint32_t object;int length;uint32_t seen;
+        template<class A> friend void Fields(A& a,WideWrapPart& w){a(w.object,w.length,w.seen);}};
+    static constexpr uint32_t kWrapKeep=24;
+    std::vector<WideWrapPart> wide_wrap;uint32_t wide_frames=0;
+    void WideRing(const WideEntry& e,std::vector<WideEntry>& to);
     // The palette slots' ROM pointers when the shadow pass starts (mk5widescreen::kPaletteTable); not state (the pass never
     // spans a ContinueMain call). A shadow draw in a slot the pass booked for another palette (the arcade has not built the
     // object, so its colours are not loaded) takes its colours from the ROM (mk5wide::Layer::Book).
@@ -81,11 +88,11 @@ private:
     // VRAM when the file has none. The shadow pass never spans a ContinueMain call: its own per-pass values are not state.
     template<class A> void WideFields(A& a){
         const bool enabled=wide.Enabled();bool present=enabled;a(present);
-        if(present){wide.LayerFields(a);a(wide_walk_drawn,wide_walk,wide_streaming,wide_staged,wide_cursor);}
+        if(present){wide.LayerFields(a);wide.EvenFields(a);a(wide_walk_drawn,wide_walk,wide_streaming,wide_staged,wide_cursor,wide_wrap,wide_frames);}
         if constexpr(A::reading){
             if(enabled==present)return;
             const bool blood=!blood_layer.empty();wide.Reset();wide_walk_drawn=wide_walk=wide_streaming=false;
-            wide_staged.clear();wide_cursor=0;
+            wide_staged.clear();wide_cursor=0;wide_wrap.clear();wide_frames=0;
             if(enabled)wide.Enable(m.vram,blood);
         }
     }
@@ -128,7 +135,12 @@ public:
     bool WideEnabled()const{return wide.Enabled();}
     const mk5wide::Layer<uint8_t>& WideLayer()const{return wide;}
     uint32_t WideBloodPixel(size_t index)const{const auto shade=wide.blood.empty()?0:wide.blood[index];return shade?blood_sprite.colors[shade]:0;}
-    void WideFrame(unsigned page_row,bool still){wide.StartFrame(page_row,m.vram,blood_layer,still);wide_walk_drawn=false;wide_staged.clear();wide_cursor=0;}   // still: mk5wide::Layer::StartFrame
+    void WideFrame(unsigned page_row,bool still){wide.StartFrame(page_row,m.vram,blood_layer,still);wide_walk_drawn=false;wide_staged.clear();wide_cursor=0;
+        ++wide_frames;wide_wrap.erase(std::remove_if(wide_wrap.begin(),wide_wrap.end(),[&](const WideWrapPart& w){return wide_frames-w.seen>kWrapKeep;}),wide_wrap.end());}   // still: mk5wide::Layer::StartFrame
+    void WideWrap(uint32_t object,int length){
+        for(auto& w:wide_wrap)if(w.object==object){w.length=length;w.seen=wide_frames;return;}
+        wide_wrap.push_back({object,length,wide_frames});
+    }
     void WideEndUnbuilt();
     // The real walk starts / ends: its draws merge the staged ones; at its end the rest of them are drawn.
     void WideRealWalk(bool inside){
@@ -142,7 +154,6 @@ public:
     }
     // The frame's window offset (mk5wide::Layer::Offset) and a scroll slot's ratio, set when the shadow pass starts.
     int WideOffset(bool shifting,int camera,int low,int high,bool keep){return wide.Offset(shifting,camera,low,high,keep);}
-    mk5wide::Ratio& WideRatio(unsigned slot){return wide.PlaneRatio(slot);}
     bool shadow_active=false;   // no VRAM, layer or timing effect may happen while it is set
     bool wide_streaming=false;  // the real streamer is running (the shadow does not run it then)
     // A list starts (or the walk ends) in the shadow walk: the waiting list's draws are measured and staged.
@@ -156,4 +167,5 @@ public:
     void WideEnd(bool complete){wide_plane.clear();wide_walk_drawn=complete;shadow_active=false;
         if(!complete){wide_staged.clear();wide.bands.clear();wide.page_shift[wide.page]=wide.shift=0;wide.page_whole[wide.page]=wide.whole=false;}}   // the real walk, mirrored whole: centred
     uint64_t wide_faults=0,wide_streamer_skips=0;uint32_t wide_fault_pc=0;   // diagnostics, not state
+    uint64_t wide_ring=0;   // ring copies staged (WideRing; diagnostics)
 };

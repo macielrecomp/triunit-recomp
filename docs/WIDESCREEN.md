@@ -2,9 +2,11 @@
 
 The Remastered edition of MK1 rev 5.0, MK2 L3.1 and MK3 rev 2.1 can show a 16:9 picture: the arcade's own 400 columns in the
 middle and 67 more on each side. It is purely visual: the game runs exactly as in 4:3. The picture's 400 centre columns
-are the arcade frame, bit for bit, with two exceptions: near an arena's ends in a fight, where the wide picture stops at
-the end of the arena's art instead of showing black beside it (see *Arena ends* below), and, in MK1 and MK3, where a
-scenery block is entering the arcade's screen and the arcade has not drawn it yet (see *Blocks entering the screen*).
+are the arcade frame, bit for bit, with three exceptions: near an arena's ends in a fight, where the wide picture stops at
+the end of the arena's art instead of showing black beside it (see *Arena ends* below); in a fight of MK1 and MK2, the
+planes behind the fighters, which move a little slower than in the arcade away from the arena's middle (see *Far planes
+move at an even pace*); and, in MK1 and MK3, where a scenery block is entering the arcade's screen and the arcade has
+not drawn it yet (see *Blocks entering the screen*).
 MK3 runs on another board (the Wolf Unit) and its arenas are built differently: what it shares with the other two
 games and what it does its own way is in *MK3* below.
 
@@ -57,25 +59,68 @@ centre does, and only there:
 - **The arcade's camera passes its limits a little.** At a wall the game's camera goes up to 3 columns past its own
   limit, and the arcade's last columns then show the page's background past the art's end. The wide camera stays on
   its limit meanwhile (for up to 8 columns), so those columns fall outside the wide picture.
-- **Far planes stop at their own ends.** A far plane (sky, walls, crowd) scrolls slower than the world and its art can
-  end sooner. The plane's ratio to the world is measured from the game's own scroll velocities, and its art's ends are
-  measured from its draws on a canvas wider than the screen. The plane then eases into the camera position where its
-  art's end meets the wide screen's edge and stays there.
-  A jump scrolls the screen up and shows lines of a plane whose art ends sooner. A stop learned while the plane already
-  stands near that end would move it at once, with the camera still, so it is taken only when taking it moves nothing
-  (the camera away from that end); until then those lines follow the edge policy below.
-- **Such frames come from the shadow's draws.** In a frame whose wide camera is not the arcade's, the world of the whole
-  picture comes from the shadow pass, and the HUD from the real draws. The acceptance tests count these frames apart.
+- **Far planes move at an even pace (MK1, MK2).** A far plane (sky, walls, crowd) scrolls slower than the world, and
+  its art is made for what the arcade shows of it: it can end a few columns past the arcade's last screen. The wide
+  picture needs 67 columns more on each side. So each far plane moves steadily between the arcade's own views of it at
+  the arena's two camera limits: at a wall the wide picture is the arcade's picture at that wall, plane by plane, with
+  the other margin's worth of arena beside it, and in the arena's middle it is the arcade's. In between each plane
+  moves a little slower than in the arcade (a plane that covers 175 columns of its art from wall to wall in the arcade
+  covers 41 here), every plane the whole way, none stopping before the others. The plane's ratio to the world is
+  measured from the game's own scroll velocities, and its pace passes through the place it had before the world first
+  moved (where a fight starts), so nothing moves when it starts. A plane whose way from limit to limit is shorter than the two margins
+  keeps the arcade's place, and a plane that moves by itself (seen moving with the world still) keeps the arcade's
+  scroll. Up to v0.12.0 each plane was instead held, with a slow-down, where its own art ended: planes with less art
+  stopped well before the others, and rows of one crowd slid against each other while the screen scrolled.
+- **Such frames come from the shadow's draws.** In a frame whose wide camera is not the arcade's, or with a far plane
+  away from the arcade's place (in MK1 and MK2, nearly every frame of a fight), the world of the whole picture comes
+  from the shadow pass, and the HUD from the real draws. The acceptance tests count these frames apart.
+- **The floor (MK2).** As in MK3, the floor is drawn line by line with a perspective of its own and keeps its own
+  place, tied to one plane's scroll (in some arenas the world's, in others a far plane's), each line a little faster
+  than the one above it (by a 128th or a 256th of that scroll's velocity, as the arena's routine has it). With an
+  offset window the shadow pass moves that place by the plane's share of the offset, so the floor stays under the
+  fighters. The floor stains of the Remastered edition and the fighters' floor shadows (drawn by direct DMA, outside
+  the display walk) land at the wide window's column too.
+- **A layer narrower than the wide screen goes on from its own art.** A far layer whose art is not as wide as the
+  wide picture (the red-sky arena's sky in MK2 is 424 columns) has each of its lines continued to the screen's edge in
+  the line's own last columns. Those columns are taken when the layer's last draw is in and nothing nearer is drawn
+  yet: a pillar that passes over the layer's end while the screen scrolls, a fighter standing there or an object
+  flying by is drawn over the continued lines like over the layer itself. Up to v0.12.0 the lines were continued from
+  the finished picture, and whatever stood over the layer's end was drawn out across the margin as a block of streaks
+  for as long as it stood there.
+- **Objects that fly across the screen (MK2).** The game flies a far plane's object (the red-sky arena's dragons)
+  across the 4:3 screen: it puts the object at one edge of that screen, moves it by its velocity, stops moving it once
+  it is off the other side, waits 96 frames and starts again. The wide picture shows more of the plane than that
+  screen, and the plane stands elsewhere under the wide camera, so the game's own flight would start out of nothing
+  inside the picture, stand still near its end and then vanish. Here every flight goes from one edge of the wide
+  picture to the other. A flight the game starts off its own screen but inside the wide picture is shown further back
+  on its way, where it starts just off the picture's edge, and keeps that distance for the whole flight (up to about
+  two margins: the object is that far behind its place in the arcade). When the game stops the object off its own
+  screen, the flight goes on with the velocity it had and the wing poses of its last frames until it has left the
+  picture, while the next flight starts. Nothing else is used: the velocity and the poses are the game's own.
+  An object standing on the 4:3 screen with no flight of its own is drawn as the arcade draws it, and a new scene
+  (the game empties its object pool) forgets every flight: up to v0.12.0 an object address that had flown in one
+  scene could stay hidden in the next (a hook and a chain missing from an attract shot of another arena).
+- **A ring of clouds (MK1).** The clouds over the pit are groups the game wraps around a ring 575 columns long: a group
+  that leaves the 4:3 screen on one side comes back on the other one ring length away, both out of sight. The wide
+  screen shows the ring as it is: each part also at one ring length to each side, where that reaches the picture, so
+  no cloud pops up or vanishes in a margin. The ring's length is read from the game's own code. The clouds keep their
+  own screen place (the game draws them like the HUD, with no camera), so they and their copies are drawn in the
+  margins at the x the game gives them.
 - **After the fight.** The round's end, the next round's start and the match's end go on like the fight while the
   arena's camera limits stand: the window follows the camera, back to the middle when the fighters are put back. Once
   the limits are gone (a finisher that frees the camera, the fade) the last offset stays while the camera does.
+  In MK2 that holds build after build only: when the game stops building for 3 display frames or more, the next
+  build is another screen and is centred, whatever its camera. The continue screen comes 38 frames after the
+  fight's last build with the camera at 0, where a fight lost at the left end of an arena whose camera starts at 0
+  leaves it: up to v0.12.0 that screen kept the fight's offset and stood at the left of the wide picture.
 - **The continue screen (MK1).** When a match is lost the game stops clearing the page and draws its countdown over the
   fight's last picture. If that fight ended near an arena's end, the wide picture keeps that last picture and its
   window while the camera stands (video RAM holds the arcade's window there, not the wide one).
 - **Free-camera arenas.** An arena without camera limits from its start stays centred.
 - **Attract demos.** The attract has one mode word for its demo fights and its other screens. A demo fight is told by
   two things: its camera limits are an arena's (not the ones the game gives a screen without an arena), and the last
-  frame's scenery went on past the 4:3 screen (24 columns or more of a margin, on 32 lines or more). Its window then
+  frame's scenery went on past the 4:3 screen (24 columns or more of a margin, on 24 lines or more, counted over all
+  the frame's scenery layers: the bridge over the pit has 31; MK3 asks for 32). Its window then
   follows the camera like a fight's. A frame that measures no scenery (the screen following an uppercut upwards) is
   still the demo while the camera stands.
 - Any other screen stays centred.
@@ -93,9 +138,14 @@ object of the game is mirrored, repeated or stretched there, and no stale video 
   dither (a sky's gradient), or they end on one straight edge (9 in 10 at the same column, over 32 lines or more: a
   backdrop picture narrower than the wide screen). All the layer's lines are treated alike: a line that could not be
   measured (its art has a hole inside the arcade's columns) and ends on that same edge goes on too, so a wall that
-  stops a few columns short of the arena's end is not left with a dashed strip. A gap that shows at most 24 columns
-  past the art (something nearer may cover the rest of the way to the screen's edge) takes the columns next to it (a
-  floor's texture a few columns on). Only an arena's lines are continued (a fight, or
+  stops a few columns short of the arena's end is not left with a dashed strip. Any other gap past a line's art
+  (something nearer may cover the rest of the way to the screen's edge) takes the 24 columns next to it, over again
+  as far as the gap goes: a textured sky or floor goes on in its own texture. Up to v0.12.0 only a gap of 24 columns
+  or fewer did, and a line with a hole inside the arcade's columns only on a straight edge: the portal arena's sky
+  (MK2) stops 21 to 30 columns short of the screen's edges, its three blocks at three different columns, and the
+  lines level with the vortex's dark centre cannot be measured, so both sides showed black blocks. A line that
+  cannot be measured now goes on like the measured lines next to it (32 lines up or down at most) when its art ends
+  where theirs does, give or take one column. Only an arena's lines are continued (a fight, or
   a screen with a far plane's picture): a menu's textured background would come out as streaks.
 - **Anything else shows black**, unless something nearer (a fighter, a projectile) is drawn there.
 - A margin pixel that no draw wrote since its page came plain from video RAM shows black.
@@ -135,7 +185,10 @@ screen are the same. The differences come from how its arenas and its screens ar
 - **The picture ends where the arcade's ends, plane by plane.** Nearly everything in an MK3 arena is a far plane with
   its own parallax (the wall behind the fighters too), and each plane's art is made to measure for what the arcade
   shows of it at the camera's limits: a wall can stop in a ragged edge a few columns short of the arcade's last screen,
-  which then shows the page's background past it. So each far plane is held where the wide screen's edge meets the
+  which then shows the page's background past it. MK3 keeps each plane at the arcade's own place away from the
+  arena's ends and eases it into its end (its art's ends are measured from its draws on a canvas wider than the
+  screen; an end learned while the plane already stands near it is taken only when taking it moves nothing), instead
+  of the even pace of MK1 and MK2. So each far plane is held where the wide screen's edge meets the
   arcade's own last column of that plane (its camera at the arena's limits, moved in by 67 columns): at an arena's
   end the wide picture shows of every plane what the arcade shows at its limit, no more. A plane is held this way once
   any of its lines ends within the arcade's last 67 columns at a limit, or short of them; a plane whose art goes on is
@@ -148,9 +201,17 @@ screen are the same. The differences come from how its arenas and its screens ar
   lines or more, each covering three quarters of the arcade's columns or more, 9 in 10 of them at a column where 32
   lines or more end, give or take one: a backdrop made of two pictures, one above the other, has two such edges), the
   margin past the edge is shown soft, in the plane's own place in the draw order (anything nearer is drawn
-  over it): each line takes the average colour of its own last 4 columns, blurred over 10 lines up and down and
+  over it). Every line of the plane that ends on such an edge goes on, whatever it covers: the rooftop's red cloud
+  covers less than half the screen on its top 23 lines, and up to v0.12.0 those lines stayed black in the margin
+  beside a sky that went on below them. Each line takes the average colour of its own last 4 columns, blurred over 10 lines up and down and
   dimmed from all of it beside the picture to 45% a margin's width further out. Nothing of the picture is copied, so
   no object can appear twice.
+- **Bars across the screen.** The subway's rails are two bars (9 and 11 lines, 402 columns) on a plane that stands
+  still on the screen: the arcade never shows where they end. A list of a fight whose lines cover every arcade column
+  and end in a margin on one column, give or take one (8 lines or more, 3 in 4 of them one pen over their last 8
+  columns: bars, not a texture), has those lines go on to the screen's edge in the pen they end in, in the list's own
+  place in the draw order. Up to v0.12.0 the rails stopped at the 4:3 screen's columns and seemed to slide over the
+  floor with the camera.
 - **The floor.** The floor is drawn line by line with a perspective of its own: it keeps its own place, tied to the
   scroll of the plane behind the fighters, each line a little faster than the one above it. With an offset window the
   shadow pass moves that place by the plane's share of the offset, so the floor stays under the fighters whether or
@@ -263,15 +324,38 @@ legal replay runs without and with widescreen, and the command checks:
    only from one frame with soft sides to another (the next screen, drawn over the fight's last picture). The suite
    must reach a match that ends with an offset window.
 11. **The power-on screen has soft sides.** In MK3, frames 200 to 590 of every replay (all run from reset).
+12. **Far planes move at an even pace.** In MK1, per arena and scenery list, the list's camera stays within 3 columns of
+   the straight line between its places at the lowest and highest world camera seen in fight builds (when those are
+   100 columns or more apart). A plane held early at its own art's end, or eased, fails.
+13. **The floor stands under a standing wide camera.** In MK2, between two builds whose arcade camera moved under a
+   wide camera standing on its limit, the floor's lines (line, image source, column) are the same.
+14. **A flight goes on in the margins.** MK2's replays must reach a far object whose flight went on in a margin after
+   the game parked it.
+15. **A flight starts and ends off the picture.** In MK2's fight frames no far object's flight shows up or is gone
+   with more than 12 columns inside the wide picture, unless the game itself started it in view (a scene that opens
+   with the object on the arcade's screen).
+
+The continuation of a narrow layer's lines has a test of its own with no ROM (`native/tests/mk5_wide_layer_tests.cpp`,
+in `python tools/quality/run.py fast`): a made-up layer, flat and dithered, with and without a nearer layer over each
+of its ends.
 
 Continued lines and soft sides (a menu's, a far backdrop's in MK3) are derived from the picture's own edge colours, not
 drawn by the game; criterion 4 covers the game's draws.
 
+Not covered by a tape: MK1's arenas other than the Courtyard in a played fight (a versus match is always fought there,
+and the tower needs wins against the machine). The attract's demo fights visit the others: `demos` must reach the
+bridge over the pit (a copy of a part of its ring of clouds staged). The bonus stage is reached with its first
+material only (the next ones need the player to break the first).
+
 The command also prints the edge coverage table: for each arena (its camera limits) and scenery layer, the fewest
 margin columns its art covered and the camera range seen. Replays: MK1 `versus-walls` (both walls of the Courtyard),
 `versus-corner-win` (a fight won near the Courtyard's right end) and `versus-jumps` (diagonal jumps from wall to
-wall, both fighters); MK2 `finisher_replays/case00`, `case05` and
-`natural-f01-stage-a`; MK3 `fight-route` (the attract, the select screen, the tower and a first fight), `jumps-N`
+wall, both fighters), and with `--all` `campaign-prefix`, `bonus` (five versus wins and the bonus stage) and `demos` (a
+lost match, then the attract's demo fights; both made by `tools/widescreen/mk1_tapes.py`); MK2 `finisher_replays/case00`, `case05`,
+`natural-f01-stage-a`, `lost-left` (one player loses the first match walking left: the continue and game over
+screens and the attract's arena shots after them) and `walk-red-sky` (the second match of `natural-f01-stage-a`, where both players walk together
+from wall to wall of the red-sky arena six times while its dragons fly across; inputs only,
+`tools/widescreen/mk2_tapes.py`); MK3 `fight-route` (the attract, the select screen, the tower and a first fight), `jumps-N`
 (a versus match on arena N of the game's order: both fighters walk to a wall, jump diagonally from wall to wall and
 back, then P1 punches until the round ends; inputs only, `tools/widescreen/mk3_tapes.py`), `finisher-NAME` (a
 legal finishing-move route of `tools/mk3/r1_finishes.json` from reset; `r1fin01` scrolls the arena away),

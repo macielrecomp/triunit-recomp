@@ -69,6 +69,12 @@ constexpr uint32_t kPaletteTable=0x0104fc20,kPaletteEntry=0x40;constexpr unsigne
 // A store through a null pointer (MOVE A8,*A0 with A0 = 0): the long lands on VRAM's first four words, far left of the
 // arcade's columns on the first page's first line. It is no draw: the wide layer leaves it out of its margin.
 constexpr uint32_t kNullWrite=0xffc99ea0;
+// A far plane the game wraps around a ring (the clouds over the pit, process FFCBA5A0): every 8 frames, for each group
+// (A8, its leader), kWrapTest tests its x and moves a group gone past the screen's right edge left by the ring's length
+// (the immediate of the MOVI at kWrapLength) with all its parts (kPartLink chain). In the arcade a part leaves the screen
+// on one side and comes back on the other one ring length away, both out of sight; the wide screen shows the ring as it
+// is, each part's copies one length away where they reach the layer (Mk5LiveVideo::WideRing).
+constexpr uint32_t kWrapTest=0xffcba660,kWrapLength=0xffcba710,kPartLink=0x20;constexpr unsigned kWrapParts=64;
 // The shadow's clip (y<<16|x): screen x -67 .. 467 plus mk5wide::kReach on each side.
 constexpr uint32_t WideTopLeft(){return uint32_t(uint16_t(int16_t(-mk5wide::kWideMargin-mk5wide::kReach)));}
 constexpr uint32_t WideBottomRight(){

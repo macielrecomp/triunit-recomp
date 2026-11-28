@@ -192,7 +192,8 @@ class TrainingTests(unittest.TestCase):
 
 class WideCaptureTests(unittest.TestCase):
     """Widescreen over the translated first-fight route: the 16:9 (534-column) capture and the shadow pass that composes it leave
-    the frames shown unchanged, and the composed frame's visible centre is the scanout's own frame in every frame."""
+    the frames shown unchanged, and the composed frame's visible centre is the scanout's own frame in every frame whose wide
+    camera is the arcade's (in a fight the far planes move at an even pace: mk5wide::Layer::even, docs/WIDESCREEN.md)."""
     @unittest.skipUnless((q.ROOT/'roms/mk2').is_dir(),'requires authenticated ROMs')
     def test_centre_is_the_frame_and_capture_is_read_only(self):
         run.verify_roms(q.ROOT/'roms/mk2')
@@ -214,8 +215,9 @@ class WideCaptureTests(unittest.TestCase):
             (off,off_s),(on,on_s)=session(False),session(True)
             self.assertEqual(lines(on,'present'),lines(off,'present'),'the capture changed a shown frame')
             wide=lines(on,'wide');self.assertGreater(len(wide),100,len(wide))
-            # The composed frame's visible centre is the arcade's frame in every frame.
-            self.assertEqual([w['centre'] for w in wide],[w['plain'] for w in wide],'the visible centre differs from the frame')
+            # The composed frame's visible centre is the arcade's frame in every frame whose world comes from the real draws.
+            same=[w for w in wide if not w['whole']];self.assertGreater(len(same),100,len(same))
+            self.assertEqual([(w['wide'],w['centre_diff']) for w in same if w['centre']!=w['plain']][:8],[],'the visible centre differs from the frame')
             self.assertEqual(len(wide),len(lines(on,'present')),'one capture per shown frame')
             # The shadow composes all 534 columns: no fault, margin pixels beyond the arcade's own spill in the fights, and
             # every margin pixel from a draw of the game meant to cover its column.
@@ -225,13 +227,13 @@ class WideCaptureTests(unittest.TestCase):
             print('seconds without/with',round(off_s,2),round(on_s,2),'frames',len(wide),'masked (quartiles)',sorted(w['masked'] for w in wide)[::len(wide)//4],
                   'margin pixels added (quartiles)',sorted(w['added'] for w in wide)[::len(wide)//4])
             # Widescreen presentation (Remastered, MK2_WIDESCREEN=1): 534-column frames whose centre is the Remastered frame
-            # (pixels and backdrop) in every frame.
+            # (pixels and backdrop) in every frame whose world comes from the real draws.
             (plain,_),(widescreen,_)=session(False,MK1_MUSIC_MODE='remastered'),session(True,MK1_MUSIC_MODE='remastered',MK2_WIDESCREEN='1')
             frames=lambda out:[json.loads(l) for l in out.splitlines() if l.startswith('{"present"')]
             plain,shown,layer=frames(plain),frames(widescreen),lines(widescreen,'wide')
             self.assertEqual((len(shown),len(layer)),(len(plain),len(plain)))
             self.assertEqual({(f['width']) for f in shown},{534});self.assertEqual({f['width'] for f in plain},{400})
-            exact=range(len(layer))
+            exact=[n for n,w in enumerate(layer) if not w['whole']];self.assertGreater(len(exact),100,len(exact))
             self.assertEqual([shown[n]['present'] for n in exact],[plain[n]['present'] for n in exact],'the widescreen centre differs')
             self.assertEqual([f['boxes'] for f in shown],[f['boxes'] for f in plain])   # no boxes without training mode
         self.assertFalse(cleanup['exists_after'])

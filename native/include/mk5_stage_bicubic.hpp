@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdint>
 #include <emmintrin.h>
+#include <condition_variable>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -13,15 +15,40 @@ inline constexpr unsigned scale=4;
 
 // Rows [0, count) in contiguous bands on up to kBands threads (the caller's one included): each row is written by one band
 // only, so the result is the single-threaded one, pixel for pixel. A small count stays on the caller's thread.
+// The other bands run on workers that live as long as the process (started with the first call): a frame makes dozens of
+// these calls, and a thread started and joined for each band of each call cost more than its rows and kept the scheduler
+// busy beside the game's own thread. One call at a time uses them; a call made from inside a band runs on its thread.
 inline constexpr unsigned kBands=4,kBandRows=64;
+class RowWorkers{
+    std::mutex call,state;std::condition_variable wake,done;
+    void(*job)(void*,unsigned)=nullptr;void* context=nullptr;unsigned bands=0,generation=0,pending=0;
+    void Work(unsigned band){
+        std::unique_lock<std::mutex> lock(state);
+        for(unsigned seen=0;;){
+            wake.wait(lock,[&]{return generation!=seen;});seen=generation;
+            if(band>=bands)continue;
+            const auto run=job;const auto with=context;
+            lock.unlock();inside()=true;run(with,band);inside()=false;lock.lock();
+            if(!--pending)done.notify_one();
+        }
+    }
+    RowWorkers(){for(unsigned band=1;band<kBands;++band)std::thread([this,band]{Work(band);}).detach();}
+public:
+    static bool& inside(){thread_local bool in_band=false;return in_band;}
+    static RowWorkers& Get(){static RowWorkers* const workers=new RowWorkers;return *workers;}   // never destroyed: its threads end with the process
+    void Run(unsigned count,void(*run)(void*,unsigned),void* with){
+        std::lock_guard<std::mutex> one(call);
+        {std::lock_guard<std::mutex> lock(state);job=run;context=with;bands=count;pending=count-1;++generation;}
+        wake.notify_all();
+        inside()=true;run(with,0);inside()=false;
+        std::unique_lock<std::mutex> lock(state);done.wait(lock,[&]{return !pending;});bands=0;
+    }
+};
 template<class Row> void ForRows(unsigned count,Row&& row){
-    const unsigned bands=std::min({kBands,std::max(1u,std::thread::hardware_concurrency()),std::max(1u,count/kBandRows)});
+    const unsigned bands=RowWorkers::inside()?1u:std::min({kBands,std::max(1u,std::thread::hardware_concurrency()),std::max(1u,count/kBandRows)});
     const auto run=[&](unsigned band){for(unsigned y=count*band/bands;y<count*(band+1)/bands;++y)row(y);};
     if(bands<2){run(0);return;}
-    std::vector<std::thread> workers;workers.reserve(bands-1);
-    for(unsigned band=1;band<bands;++band)workers.emplace_back(run,band);
-    run(0);
-    for(auto& worker:workers)worker.join();
+    RowWorkers::Get().Run(bands,[](void* with,unsigned band){(*static_cast<decltype(run)*>(with))(band);},const_cast<void*>(static_cast<const void*>(&run)));
 }
 
 struct CubicTap {

@@ -65,7 +65,7 @@ struct Wide : DmaObserver, CpuVramObserver {
           w.faults, w.streamer_skips, w.passes, w.fault_pc, w.updater_idle, w.cpu_next, w.cpu_run, w.hand);
     }
 
-    void Start() { layer.Enable(board->o.vram, true); layer.seen = kSeen; layer.edges = false; }
+    void Start() { layer.Enable(board->o.vram, true); layer.seen = kSeen; layer.edges = false; layer.even = false; layer.arena_lines = Layer::kPicture; }
     // A state saved without widescreen was loaded: the layer starts over from what VRAM holds.
     void Restart() {
         layer.Reset(); Start();
@@ -456,17 +456,18 @@ private:
         }
         if (!draws.empty()) {
             auto band = mk5wide::MeasureBand(uint16_t(list_), draws, meant, [&](const std::array<uint16_t, 18>& r, auto&& put) {
-                if (!Render(r, kCanvas, false, [&](size_t index, uint16_t) {
-                        put(index);
-                        if (!backdrop) return;
-                        const size_t row = index / size_t(kCanvas);
-                        const int at = int(index % size_t(kCanvas)), c = at - kOrigin - mk5wide::kWideMargin;
-                        if (row >= 512) return;
-                        extent_.lo[row] = std::min(extent_.lo[row], int16_t(at)); extent_.hi[row] = std::max(extent_.hi[row], int16_t(at + 1));
-                        if (c < 0 || c >= mk5wide::kVisible) return;
-                        uint64_t& word = extent_.bits[row * kCoverWords + size_t(c) / 64];
-                        if (const uint64_t bit = uint64_t(1) << (c % 64); !(word & bit)) { word |= bit; ++extent_.cover[row]; }
-                    })) refused[of[size_t(&r - draws.data())]] = 1; }, kCanvas, kOrigin);
+                if (Render(r, kCanvas, false, [&](size_t index, uint16_t) { put(index); })) return true;
+                refused[of[size_t(&r - draws.data())]] = 1; return false; },
+                [&](size_t row, int a, int b) {   // a run of a line's own columns [a, b) on the canvas
+                    if (!backdrop) return;
+                    extent_.lo[row] = std::min(extent_.lo[row], int16_t(a)); extent_.hi[row] = std::max(extent_.hi[row], int16_t(b));
+                    mk5wide::SetColumns(&extent_.bits[row * kCoverWords], a - kOrigin - mk5wide::kWideMargin, b - kOrigin - mk5wide::kWideMargin);
+                }, kCanvas, kOrigin, &layer.shapes, layer.debug);
+            if (backdrop) for (size_t y = 0; y < 512; ++y) {
+                int covered = 0;
+                for (size_t w = 0; w < kCoverWords; ++w) covered += __builtin_popcountll(extent_.bits[y * kCoverWords + w]);
+                extent_.cover[y] = uint16_t(covered);
+            }
             // An arena here is many planes with holes, none of which need cover kPicture whole lines on its own (one
             // whose floor alone does shows fewer of them while the screen bobs): the lines that go on past the
             // arcade's screen (mk5wide::Layer::wider) are counted over all the build's layers.
@@ -512,26 +513,34 @@ private:
     // line, not an object's) and none of its draws reaches past the measured canvas on that side; a side counts with
     // kPicture such lines or more, 9 in 10 of them on a straight edge: a column, give or take one, where kPicture
     // lines or more end (a backdrop made of two pictures, one above the other, has two).
+    // On a side that counts, every line of the plane that ends on that straight edge goes on, whatever it covers: a
+    // picture's top can be a cloud over half the screen (the rooftop's red sky), cut by the same edge as the rest.
     // before: the layer's serial before the plane's draws (a later one: the plane's own pixel).
     void SoftBackdrop(uint32_t before) {
         constexpr int kOrigin = mk5wide::kReach, W = mk5wide::kLayerWidth, kFirst = mk5wide::kWideMargin, kLast = mk5wide::kWideMargin + mk5wide::kVisible - 1;
         const size_t page = size_t(layer.page) * 256;
         for (int side = 0; side < 2; ++side) {
-            const auto edge = [&](size_t y) -> int {   // the line's outermost own pixel (layer column) when it ends in the margin; -1: none
-                if (extent_.cover[y] < mk5wide::kVisible * 3 / 4 || (extent_.reach[y] & (side ? 2 : 1))) return -1;
+            // the line's outermost own pixel (layer column) when it ends in the margin; -1: none. covered: a backdrop's line only
+            const auto edge = [&](size_t y, bool covered) -> int {
+                if ((covered && extent_.cover[y] < mk5wide::kVisible * 3 / 4) || extent_.hi[y] <= extent_.lo[y] || (extent_.reach[y] & (side ? 2 : 1))) return -1;
                 const int e = side ? extent_.hi[y] - 1 - kOrigin : extent_.lo[y] - kOrigin;
                 return (side ? e >= kLast - mk5wide::kSoftSkip && e < W - 1 : e > 0 && e <= kFirst + mk5wide::kSoftSkip) ? e : -1;
             };
             std::array<int, mk5wide::kLayerWidth + 2> ends{};
             int lines = 0, straight_lines = 0;
-            for (size_t y = page; y < page + 256; ++y) if (const int e = edge(y); e >= 0) { ++lines; ++ends[size_t(e)]; }
+            for (size_t y = page; y < page + 256; ++y) if (const int e = edge(y, true); e >= 0) { ++lines; ++ends[size_t(e)]; }
             const auto run = [&](int c) { return c > 0 && c < W - 1 ? ends[size_t(c - 1)] + ends[size_t(c)] + ends[size_t(c + 1)] : 0; };
             const auto straight = [&](int e) { return std::max({run(e - 1), run(e), run(e + 1)}) >= Layer::kPicture; };
-            for (size_t y = page; y < page + 256; ++y) if (const int e = edge(y); e >= 0) straight_lines += straight(e);
-            if (lines < Layer::kPicture || straight_lines * 10 < lines * 9) continue;
+            for (size_t y = page; y < page + 256; ++y) if (const int e = edge(y, true); e >= 0) straight_lines += straight(e);
+            if (lines < Layer::kPicture || straight_lines * 10 < lines * 9) {   // no picture: bars, if any
+                std::vector<size_t> rows;
+                for (size_t y = page; y < page + 256; ++y) if (extent_.cover[y] >= mk5wide::kVisible) rows.push_back(y);
+                Bars(side, before, rows);
+                continue;
+            }
             layer.Draw(mk5wide::Kind::continued, side ? kLast + 1 : 0, side ? W : kFirst);
             for (size_t y = page; y < page + 256; ++y) {
-                const int e = edge(y);
+                const int e = edge(y, false);
                 const size_t row = y * size_t(W);
                 if (e < 0 || !straight(e) || layer.written[row + size_t(e)] <= before) continue;
                 for (int L = side ? std::max(e + 1, kLast + 1) : std::min(e - 1, kFirst - 1), k = 0; L >= 0 && L < W; L += side ? 1 : -1, ++k) {
@@ -545,9 +554,64 @@ private:
             }
         }
     }
+    // A plane that is a few bars across the arcade's whole screen (the subway's rails: two bars of 9 and 11 lines,
+    // 402 columns, on a plane that stands still) is no picture to show soft: a rail does not end where a 4:3 screen
+    // does. Of the given lines, those the plane's own pixels cover on every arcade column and that end in this margin
+    // on one column, give or take one (kBars lines or more, 3 in 4 of them one pen over their last kPattern columns:
+    // bars, not a texture), go on to the screen's edge in the pen they end in, in the plane's own place in the draw
+    // order. before: the layer's serial before the plane's draws.
+    static constexpr int kBars = 8;
+    void Bars(int side, uint32_t before, const std::vector<size_t>& rows) {
+        constexpr int W = mk5wide::kLayerWidth, kFirst = mk5wide::kWideMargin, kLast = mk5wide::kWideMargin + mk5wide::kVisible - 1;
+        const auto own = [&](size_t row, int L) { return L >= 0 && L < W && layer.written[row + size_t(L)] > before; };
+        std::vector<std::pair<size_t, int>> lines;   // the row and its last own column in this margin
+        std::array<int, mk5wide::kLayerWidth + 2> ends{};
+        for (const size_t y : rows) {
+            const size_t row = y * size_t(W);
+            bool whole = true;
+            for (int L = kFirst; L <= kLast && whole; ++L) whole = own(row, L);
+            if (!whole) continue;
+            int e = side ? kLast : kFirst;
+            while (own(row, side ? e + 1 : e - 1)) e += side ? 1 : -1;
+            if (side ? e < W - 1 : e > 0) { lines.push_back({row, e}); ++ends[size_t(e)]; }
+        }
+        int at = 0, most = 0, flat = 0;
+        for (int c = 1; c < W; ++c) if (const int n = ends[size_t(c - 1)] + ends[size_t(c)] + ends[size_t(c + 1)]; n > most) { most = n; at = c; }
+        if (most < kBars) return;
+        const auto bar = [&](int e) { return std::abs(e - at) <= 1; };
+        for (const auto& [row, e] : lines) if (bar(e)) {
+            bool one = true;
+            for (int k = 1; k < Layer::kPattern && one; ++k) one = layer.pens[row + size_t(side ? e - k : e + k)] == layer.pens[row + size_t(e)];
+            flat += one;
+        }
+        if (flat * 4 < most * 3) return;
+        layer.Draw(mk5wide::Kind::continued, side ? kLast + 1 : 0, side ? W : kFirst);
+        for (const auto& [row, e] : lines) if (bar(e))
+            for (int L = side ? e + 1 : e - 1; L >= 0 && L < W; L += side ? 1 : -1) {
+                const size_t to = row + size_t(L);
+                layer.pens[to] = layer.pens[row + size_t(e)]; layer.fixed[to] = 0;
+                if (!layer.blood.empty()) layer.blood[to] = 0;
+                layer.Stamp(to);
+            }
+    }
     void Place(const Draw& d) { if (shadow_post) pending.push_back(d); else DrawWide(d); }
     void Flush() {
-        for (const auto& d : pending) DrawWide(d);
+        for (size_t k = 0; k < pending.size();) {   // list by list: a list of a fight that is only bars has them go on (Bars)
+            const uint32_t before = layer.serial;
+            const int list = pending[k].layer;
+            bool bars = layer.fight && list >= 0;
+            std::vector<size_t> rows;
+            for (; k < pending.size() && pending[k].layer == list; ++k) {
+                const Draw& d = pending[k];
+                DrawWide(d);
+                if (!bars) continue;
+                const auto [lo, hi] = mk5wide::Span(d.entry[4], d.entry[6], d.entry[10], (d.entry[1] & 0x10) != 0);
+                bars = !d.stains && !d.fixed && lo + mk5wide::kExtra <= mk5wide::kWideMargin && hi + mk5wide::kExtra >= mk5wide::kWideMargin + mk5wide::kVisible;
+                const auto [first, last] = mk5wide::Rows(LayerRegisters(d.entry));
+                for (int y = std::max(first, 0); y < std::min(last, 512); ++y) rows.push_back(size_t(y));
+            }
+            if (bars) for (int side = 0; side < 2; ++side) Bars(side, before, rows);
+        }
         pending.clear(); shadow_post = false;
     }
     void DrawWide(const Draw& d) {

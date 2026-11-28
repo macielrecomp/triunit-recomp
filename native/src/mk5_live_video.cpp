@@ -310,8 +310,23 @@ bool Mk5LiveVideo::ShadowWrite(unsigned offset,uint16_t value){
         }
     }
     const WideEntry e{r,cpu.a[0],wide_hud,wide_hud?-1:wide_layer};
-    if(wide_hud)WideStage(e);else wide_plane.push_back(e);
+    if(wide_hud){WideStage(e);WideRing(e,wide_staged);}else{wide_plane.push_back(e);WideRing(e,wide_plane);}
     return true;
+}
+// A part of a group the game wraps around a ring (WideWrap): its copies one ring length away on each side, where they
+// reach the layer, so no part pops up or vanishes in the margins. A copy belongs to no object: the real walk never draws
+// it. The groups keep their own screen place (the drawer takes them for screen-fixed objects, as it does the HUD), so
+// their copies are staged like them: in the margins only.
+void Mk5LiveVideo::WideRing(const WideEntry& e,std::vector<WideEntry>& to){
+    const auto part=std::find_if(wide_wrap.begin(),wide_wrap.end(),[&](const WideWrapPart& w){return w.object==e.object;});
+    if(part==wide_wrap.end())return;
+    const auto [lo,hi]=mk5wide::Span(e.regs[4],e.regs[6],e.regs[10],(e.regs[1]&16)!=0);
+    int x=e.regs[4]&0x3ff;if(x>=768)x-=1024;
+    for(const int move:{-part->length,part->length}){
+        const int at=x+move;
+        if(at<-256 || at>=768 || hi+move+mk5wide::kExtra<=0 || lo+move+mk5wide::kExtra>=mk5wide::kLayerWidth)continue;
+        auto copy=e;copy.object=0;copy.regs[4]=uint16_t((e.regs[4]&~0x3ffu)|(unsigned(at)&0x3ffu));to.push_back(copy);++wide_ring;
+    }
 }
 void Mk5LiveVideo::WideStage(const WideEntry& e){wide_staged.push_back(e);}
 void Mk5LiveVideo::WidePalettes(std::array<uint32_t,64>& to)const{
@@ -387,7 +402,8 @@ bool Mk5LiveVideo::WidePlane(){
         if(wide.debug)wide.notes.push_back({uint16_t(e.layer),uint32_t(r[2]|uint32_t(r[3])<<16),uint16_t(r[5]&0x1ff),int16_t(a+mk5wide::kExtra),int16_t(b+mk5wide::kExtra),wide_camera});
     }
     auto band=mk5wide::MeasureBand(uint16_t(wide_plane.front().layer),draws,meant,[&](const std::array<uint16_t,18>& r,auto&& put){
-        DmaShape d;if(Shape(r,gfx,d))Blit(r,d,gfx,[&](size_t dest,uint16_t){put(dest);},kCanvas);},kCanvas,kOrigin);
+        DmaShape d;if(!Shape(r,gfx,d))return false;
+        Blit(r,d,gfx,[&](size_t dest,uint16_t){put(dest);},kCanvas);return true;},[](size_t,int,int){},kCanvas,kOrigin,&wide.shapes,wide.debug);
     wide.Measured(wide_slot,wide_camera,std::move(band));
     for(const auto& e:wide_plane)WideStage(e);
     wide_plane.clear();return true;

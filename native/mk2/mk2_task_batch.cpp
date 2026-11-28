@@ -177,7 +177,16 @@ static TaskBatchInit ExecuteTaskBatch(const Program& program, const BootContinua
         for(unsigned slot=0;slot<w::kScrollSlots;++slot){
             const uint32_t scroll=w::kScrollFirst+slot*0x20;const auto arcade=scroll_at(scroll);
             const auto wide=slot==w::kWorldSlot?int32_t(arcade+offset):layer.PlaneScroll(slot,arcade,camera,offset);
+            o.out.video.wide_delta[slot]=int16_t((wide>>16)-(arcade>>16));
             if(wide!=arcade){o.Write32(scroll,uint32_t(wide));layer.Whole();}
+            // The floor follows this slot's velocity from its own longs: they move by the slot's share of the window's
+            // offset, whether or not the slot's plane is held at its art's end, so the floor stays under the fighters.
+            if(offset&&uint32_t(scroll_at(w::kFloorVelocity))==scroll-w::kScrollVelocityGap){
+                const auto& r=layer.ratio[slot];const int32_t moved=int32_t(r.world?offset*r.plane/r.world:offset);
+                o.Write32(w::kFloorX,uint32_t(scroll_at(w::kFloorX)-moved));
+                for(const auto& routine:w::kFloorPerspective)if(routine.pc==uint32_t(scroll_at(w::kFloorRoutine)))
+                    o.Write32(w::kFloorSlope,uint32_t(scroll_at(w::kFloorSlope)-(moved>>routine.shift)));
+            }
         }
     };
     while (live_host ? s.cycles<end_cycle :
@@ -223,10 +232,9 @@ static TaskBatchInit ExecuteTaskBatch(const Program& program, const BootContinua
                     namespace w=mk2::wide;auto& layer=o.out.video.wide;
                     const auto word=[&](uint32_t bit){return int16_t(o.out.main_ram[(bit-0x01000000)/16]);};
                     const unsigned mode=uint16_t(word(w::kMode));
-                    layer.Offset(w::Shifting(mode)||w::Demo(mode,word(w::kCameraMin),word(w::kCameraMax),layer.arena,layer.fight,word(w::kCameraX)==layer.held[0]),word(w::kCameraX),word(w::kCameraMin),word(w::kCameraMax),mode!=w::kAttractMode);
-                    if(const auto world_velocity=int32_t(ram_long(w::kScrollFirst+w::kWorldSlot*0x20-w::kScrollVelocityGap)))
-                        for(unsigned slot=0;slot<w::kScrollSlots;++slot)
-                            layer.PlaneRatio(slot)=mk5wide::MeasuredRatio(int32_t(ram_long(w::kScrollFirst+slot*0x20-w::kScrollVelocityGap)),world_velocity);
+                    layer.Offset(w::Shifting(mode)||w::Demo(mode,word(w::kCameraMin),word(w::kCameraMax),layer.arena,layer.fight,word(w::kCameraX)==layer.held[0]),word(w::kCameraX),word(w::kCameraMin),word(w::kCameraMax),mode!=w::kAttractMode&&!layer.Paused());
+                    for(unsigned slot=0;slot<w::kScrollSlots;++slot)
+                        layer.Velocity(slot,int32_t(ram_long(w::kScrollFirst+slot*0x20-w::kScrollVelocityGap)),int32_t(ram_long(w::kScrollFirst+w::kWorldSlot*0x20-w::kScrollVelocityGap)));
                 }
                 shadow_view();
                 // The free list does not end in 0 (its last link holds another value): the game never takes its last object, but
@@ -266,7 +274,7 @@ static TaskBatchInit ExecuteTaskBatch(const Program& program, const BootContinua
         if(instruction_pc==mk2::wide::kDisplayIrq)o.out.video.EndWideFrame();   // a new frame
         if(instruction_pc==mk2::wide::kStreamer)o.out.video.margin_streamer=o.out.video.margin_streaming=true;   // it streams
         else if(instruction_pc==mk2::wide::kStreamerReturn)o.out.video.margin_streaming=false;   // the streamer returned
-        else if(instruction_pc==mk2::wide::kPoolReset[0]||instruction_pc==mk2::wide::kPoolReset[1])o.out.video.margin_streamer=false;
+        else if(instruction_pc==mk2::wide::kPoolReset[0]||instruction_pc==mk2::wide::kPoolReset[1]){o.out.video.margin_streamer=false;o.out.video.wide_moving.clear();}   // every object is freed: no flight goes on
         if(instruction_pc==mk2::wide::kQueueReset && o.out.video.WideEnabled())   // the frame's queue reset: its page as VRAM holds it
             o.out.video.StartWideFrame(o.out.main_ram[(mk2::wide::kPageOrigin-0x01000000)/16+1]&0x1ff);
         if(instruction_pc==mk5hitbox::kMk2.strike_pc)mk5hitbox::Strike(mk5hitbox::kMk2,s.a.data(),o.out.main_ram);   // training mode, read-only

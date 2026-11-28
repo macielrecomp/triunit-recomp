@@ -122,7 +122,7 @@ struct BootVideo {
                     const auto shade=blood_pixels[k];
                     if(!shade)continue;
                     if(wide_on){
-                        const int column=int(page_x)+x+mk5wide::kExtra;
+                        const int column=int(page_x)+x+mk5wide::kExtra-wide.page_shift[page_y?1:0];
                         if(column>=0 && column<mk5wide::kLayerWidth)
                             wide.blood[(page_y+y)*mk5wide::kLayerWidth+size_t(column)]=uint16_t(stain.colors[shade]|0x8000);
                     }
@@ -352,15 +352,18 @@ struct BootVideo {
             MaskBlood(index);
             UpdateBackdrop(index,scenery);
         };
-        // Widescreen: a mirrored DMA reaches the layer where it lands in VRAM.
+        // Widescreen: a mirrored DMA reaches the layer where it lands in VRAM; one that draws the world (a fighter's floor
+        // shadow, by direct DMA) lands at the wide window's column, so it stays under its fighter near an arena's end.
         const bool actor=mk5wide::Layer<uint16_t>::ActorDraw(command);   // a floor shadow
+        const int mirror_extra=mk5wide::kExtra-(wide_mirror_world?wide.shift:0);
         if(wide_mirror){const auto [lo,hi]=mk5wide::Span(dma_registers[4],dma_registers[6],dma_registers[10],(command&0x10)!=0);
-            wide.Draw(mk5wide::Kind::real,lo+mk5wide::kExtra,hi+mk5wide::kExtra);}
+            wide.Draw(mk5wide::Kind::real,lo+mirror_extra,hi+mirror_extra);}
         const auto pixels=Render(command,dma_registers,dma_palette,graphics,[&](size_t index,uint16_t pen,bool write){
             auto& dest=vram.at(index);
             if(write){dest=pen;present_pixel(index);
-                if(wide_mirror){const auto at=wide.At(index);
-                    if(at>=0){wide.Write(size_t(at),pen,!wide_mirror_world);if(actor)wide.fixed[size_t(at)]|=mk5wide::Layer<uint16_t>::kActor;}}}
+                if(wide_mirror){const int column=int(index&511)+mirror_extra;
+                    if(column>=0&&column<mk5wide::kLayerWidth){const size_t at=(index>>9)*mk5wide::kLayerWidth+size_t(column);
+                        wide.Write(at,pen,!wide_mirror_world);if(actor)wide.fixed[at]|=mk5wide::Layer<uint16_t>::kActor;}}}
         },[&]{prepare_fighter_surface();});
         board.dma_command=command; board.io[18]&=uint16_t(~2);
         return pixels;
@@ -401,6 +404,86 @@ struct BootVideo {
     // The palette slots' ROM pointers when the shadow pass starts (mk2::wide::kPaletteTable); not state (the pass never spans
     // a batch). A shadow draw in a slot the pass booked for another palette takes its colours from the ROM (Layer::Book).
     std::array<uint32_t,mk2::wide::kPaletteSlots> wide_palettes{};
+    // Far-plane objects the shadow walk staged moving (x velocity long 16.16, not 0): the red-sky arena's dragons. The game
+    // flies each across the arcade's screen: it puts the object just off one side of that screen, moves it by its
+    // velocity, parks it once it is off the other side (velocity 0), waits and starts again. The wide picture shows more
+    // of the plane than that screen (the margins, and the plane's own place under the wide camera: wide_delta), so the
+    // game's flight would start out of nothing inside the picture, stand still at its end and then vanish. Here each
+    // flight goes from one edge of the wide picture to the other:
+    //  - a flight the game starts off the arcade's screen but inside the wide picture is shown further back on its way
+    //    (lead, columns), where it starts just off the picture's edge, and keeps that distance all the way;
+    //  - when the game parks the object off the arcade's screen, the flight goes on by itself (a WideGhost: its velocity
+    //    and its recorded wing cycle) until it has left the picture, the next flight starting meanwhile.
+    // An object the game stops on the arcade's own screen stays where it is shown, and one standing there with no flight
+    // of its own is drawn as the arcade draws it. One not staged for kMoverKeep frames is forgotten (freed, reused), and
+    // so are all of them when the game resets its object pool (a new scene). Nothing but the game's own velocity and poses is used; the acceptance counts a
+    // ghost's draws (wide_flown) like any other of the shadow's.
+    struct WideFlight{std::array<uint16_t,12> entry;int16_t hot;template<class A> friend void Fields(A& a,WideFlight& f){a(f.entry,f.hot);}};
+    struct WideGhost{int32_t velocity=0,park_x=0;uint32_t parked=0;int16_t lead=0;uint32_t id=0;std::vector<WideFlight> flight;
+        template<class A> friend void Fields(A& a,WideGhost& g){a(g.velocity,g.park_x,g.parked,g.lead,g.id,g.flight);}};
+    struct WideMover{uint32_t object=0,seen=0;int32_t velocity=0;int16_t lead=0;uint8_t flying=0;uint32_t id=0;std::vector<WideFlight> flight;std::vector<WideGhost> ghosts;
+        template<class A> friend void Fields(A& a,WideMover& m){a(m.object,m.seen,m.velocity,m.lead,m.flying,m.id,m.flight,m.ghosts);}};
+    // Debug (wide.debug, the acceptance): each flight's draw in a build: its id (bit 0: the game started it on the
+    // arcade's own screen, a scene that opens with the object in view), its layer columns and whether the game's object
+    // is on the arcade's own screen now (a ghost's is not).
+    struct WideSeen{uint32_t id;int16_t lo,hi;bool on_arcade;};
+    std::vector<WideSeen> wide_seen,wide_seen_done;uint32_t wide_flights=0;   // wide_flights: flights started (their ids; state)
+    static constexpr uint32_t kMoverKeep=8,kFlightOut=600;static constexpr size_t kFlight=48;static constexpr int kFlightEdge=8;   // kFlightOut: frames, a bound
+    std::array<int16_t,10> wide_delta{};   // per scroll slot, this pass: the shadow's camera minus the arcade's (columns); not state
+    std::vector<WideMover> wide_moving;uint32_t wide_frame=0;uint64_t wide_flown=0;   // wide_flown: ghost draws (diagnostics)
+    static int EntryX(const std::array<uint16_t,12>& e){const int x=e[4]&0x3ff;return x>=768?x-1024:x;}
+    static std::array<uint16_t,12> EntryAt(std::array<uint16_t,12> e,int x){e[4]=uint16_t((e[4]&~0x3ffu)|(unsigned(x)&0x3ffu));return e;}
+    // The entries to draw for an object of a far list (x: its x position long, screen: its x on the plane's screen under
+    // the shadow's camera, both from the game's RAM): its own, and its earlier flights still crossing the picture.
+    std::vector<std::array<uint16_t,12>> WideMove(uint32_t object,int32_t velocity,int32_t x,int screen,const std::array<uint16_t,12>& entry){
+        if(wide_slot<0)return {entry};
+        auto it=std::find_if(wide_moving.begin(),wide_moving.end(),[&](const WideMover& m){return m.object==object;});
+        if(!velocity&&it==wide_moving.end())return {entry};
+        if(it==wide_moving.end()){wide_moving.push_back({});it=wide_moving.end()-1;it->object=object;}
+        auto& m=*it;m.seen=wide_frame;
+        const auto [lo,hi]=WideSpan(entry);   // VRAM columns under the shadow's camera
+        const int delta=wide_delta[size_t(wide_slot)];
+        // On the arcade's own screen: more than its edge columns (the game starts a flight with the object's first columns there).
+        const bool on_arcade=std::min(hi+delta,mk2::wide::kMargin+400)-std::max(lo+delta,mk2::wide::kMargin)>kFlightEdge;
+        std::vector<std::array<uint16_t,12>> shown;
+        if(velocity){
+            if(!m.flying){   // a flight starts: off the arcade's screen, it starts off the wide picture's edge too
+                m.flying=1;m.flight.clear();m.lead=0;m.id=++wide_flights<<1|uint32_t(on_arcade);
+                if(!on_arcade){
+                    const int left=lo+mk5wide::kExtra,right=hi+mk5wide::kExtra;   // layer columns
+                    if(velocity<0&&left<mk5wide::kLayerWidth)m.lead=int16_t(mk5wide::kLayerWidth-left);
+                    else if(velocity>0&&right>0)m.lead=int16_t(-right);
+                }
+            }
+            m.velocity=velocity;
+            m.flight.push_back({entry,int16_t(EntryX(entry)-screen)});
+            if(m.flight.size()>kFlight)m.flight.erase(m.flight.begin());
+            shown.push_back(EntryAt(entry,EntryX(entry)+m.lead));
+        }else if(m.flying&&!on_arcade&&!m.flight.empty()){   // parked off the arcade's screen: the flight goes on by itself
+            m.ghosts.push_back({m.velocity,x,wide_frame,m.lead,m.id,std::move(m.flight)});m.flight.clear();m.flying=0;
+        }else if(m.flying)shown.push_back(EntryAt(entry,EntryX(entry)+m.lead));   // stopped on the arcade's screen: as shown
+        else if(on_arcade)shown.push_back(entry);   // no flight's object, standing on the arcade's screen: the arcade shows it
+        const int camera=(x>>16)-screen;   // the list's camera under the shadow
+        for(size_t g=0;g<m.ghosts.size();){
+            auto& ghost=m.ghosts[g];const size_t n=ghost.flight.size();size_t period=n;
+            // The wing cycle: the shortest period whose last frames repeat the ones before (image source), else the whole record.
+            const auto source=[&](size_t i){return uint32_t(ghost.flight[i].entry[2])|uint32_t(ghost.flight[i].entry[3])<<16;};
+            for(size_t p=4;p<=n/2&&period==n;++p){bool same=true;for(size_t k=0;k<p&&same;++k)same=source(n-1-k)==source(n-1-k-p);if(same)period=p;}
+            const uint32_t t=wide_frame-ghost.parked+1;const auto& pose=ghost.flight[n-period+t%period];
+            const int at=int((int64_t(ghost.park_x)+int64_t(ghost.velocity)*t)>>16)-camera+ghost.lead+pose.hot;
+            auto e=EntryAt(pose.entry,at);
+            e[5]=uint16_t((e[5]&~0x100u)|(entry[5]&0x100u));   // the y register's page bit: this frame's page
+            const auto [a,b]=WideSpan(e);
+            const bool gone=ghost.velocity<0?b+mk5wide::kExtra<=0:a+mk5wide::kExtra>=mk5wide::kLayerWidth;
+            if(gone||t>kFlightOut||at<-256||at>=768){m.ghosts.erase(m.ghosts.begin()+std::ptrdiff_t(g));continue;}
+            shown.push_back(e);++wide_flown;++g;
+            if(wide.debug)wide_seen.push_back({ghost.id,int16_t(a+mk5wide::kExtra),int16_t(b+mk5wide::kExtra),false});
+        }
+        if(wide.debug&&m.flying){const auto [a,b]=WideSpan(shown.front());wide_seen.push_back({m.id,int16_t(a+mk5wide::kExtra),int16_t(b+mk5wide::kExtra),on_arcade});}
+        // A flight shown away from the game's object is no part of the arcade's picture: the build's world is the shadow's.
+        if((m.flying&&m.lead)||!m.ghosts.empty())wide.Whole();
+        return shown;
+    }
     bool WideFresh(uint32_t object)const{return std::binary_search(wide_free.begin(),wide_free.end(),object);}
     // An entry's columns in the layer [first, last) from its x (10-bit DMA x read as -256..767), width, X step and flip.
     static std::pair<int,int> WideSpan(const std::array<uint16_t,12>& e){return mk5wide::Span(e[4],e[6],e[10],(e[1]&0x10)!=0);}
@@ -413,6 +496,8 @@ struct BootVideo {
         wide.StartFrame(page_row,vram,blood_layer);
         wide_walk_entries.clear();wide_walk_drawn=false;wide_shadow_post=wide_real_post=wide_post_keyed=false;wide_pending.clear();
         wide_plane.clear();wide_layer=0;
+        wide_seen_done.swap(wide_seen);wide_seen.clear();
+        ++wide_frame;wide_moving.erase(std::remove_if(wide_moving.begin(),wide_moving.end(),[&](const WideMover& m){return wide_frame-m.seen>kMoverKeep;}),wide_moving.end());
     }
     void MirrorWide(size_t start,size_t count){wide.Mirror(vram,start,count);}
     uint32_t WideBloodPixel(size_t index)const{const auto pixel=wide.blood.empty()?0:wide.blood[index];return pixel?ExpandRgb555(pixel):0;}
@@ -436,24 +521,32 @@ struct BootVideo {
         // Measured over the shadow's whole clip (the layer and kReach columns on each side): a far plane's art ends are
         // known before they reach the wide screen (mk5wide::Layer::Learn).
         constexpr int kOrigin=mk5wide::kReach,kCanvas=mk5wide::kLayerWidth+2*mk5wide::kReach;
-        std::vector<std::array<uint16_t,18>> draws;std::vector<std::pair<int,int>> meant;
-        for(size_t n=0;n<wide_plane.size();){
-            const auto& e=wide_plane[n].entry;const auto r=LayerRegisters(e);
-            try{Render(e[1],r,e[8],graphics,[](size_t,uint16_t,bool){},[]{},mk5wide::kLayerWidth,Passes::check);}
-            catch(const std::runtime_error&){wide_plane.erase(wide_plane.begin()+std::ptrdiff_t(n));continue;}
-            const auto [a,b]=mk5wide::Span(e[4],e[6],e[10],(e[1]&0x10)!=0);
-            auto canvas=r;canvas[4]=uint16_t((e[4]+kOrigin+mk5wide::kExtra)&0x3ff);canvas[17]=kCanvas-1;
-            draws.push_back(canvas);meant.push_back({a+kOrigin+mk5wide::kExtra,b+kOrigin+mk5wide::kExtra});
-            if(wide.debug)wide.notes.push_back({uint16_t(wide_layer),uint32_t(e[2]|uint32_t(e[3])<<16),uint16_t(e[5]&0xff),   // the row within its page
-                int16_t(a+mk5wide::kExtra),int16_t(b+mk5wide::kExtra),wide_camera});
-            ++n;
+        std::vector<std::array<uint16_t,18>> draws;std::vector<std::pair<int,int>> meant;std::vector<uint8_t> refused;
+        const auto measure=[&]{
+            draws.clear();meant.clear();
+            for(const auto& staged:wide_plane){
+                const auto& e=staged.entry;const auto [a,b]=mk5wide::Span(e[4],e[6],e[10],(e[1]&0x10)!=0);
+                auto canvas=LayerRegisters(e);canvas[4]=uint16_t((e[4]+kOrigin+mk5wide::kExtra)&0x3ff);canvas[17]=kCanvas-1;
+                draws.push_back(canvas);meant.push_back({a+kOrigin+mk5wide::kExtra,b+kOrigin+mk5wide::kExtra});
+            }
+            refused.assign(draws.size(),0);
+            return mk5wide::MeasureBand(uint16_t(wide_layer),draws,meant,[&](const std::array<uint16_t,18>& r,auto&& put){
+                try{Render(r[1],r,r[8],graphics,[&](size_t index,uint16_t,bool){put(index);},[]{},kCanvas,Passes::check);return true;}   // the check pass (write false) gives every pixel
+                catch(const std::runtime_error&){refused[size_t(&r-draws.data())]=1;return false;}},[](size_t,int,int){},kCanvas,kOrigin,&wide.shapes,wide.debug);
+        };
+        auto band=measure();
+        if(std::find(refused.begin(),refused.end(),1)!=refused.end()){   // measured again without the refused entries
+            for(size_t n=wide_plane.size();n--;)if(refused[n])wide_plane.erase(wide_plane.begin()+std::ptrdiff_t(n));
+            band=measure();
         }
-        auto band=mk5wide::MeasureBand(uint16_t(wide_layer),draws,meant,[&](const std::array<uint16_t,18>& r,auto&& put){
-            try{Render(r[1],r,r[8],graphics,[&](size_t index,uint16_t,bool){put(index);},[]{},kCanvas,Passes::check);}   // the check pass (write false) gives every pixel
-            catch(const std::runtime_error&){}},kCanvas,kOrigin);
+        if(wide.debug)for(const auto& staged:wide_plane){const auto& e=staged.entry;const auto [a,b]=mk5wide::Span(e[4],e[6],e[10],(e[1]&0x10)!=0);
+            wide.notes.push_back({uint16_t(wide_layer),uint32_t(e[2]|uint32_t(e[3])<<16),uint16_t(e[5]&0xff),   // the row within its page
+                int16_t(a+mk5wide::kExtra),int16_t(b+mk5wide::kExtra),wide_camera});}
         wide.Measured(wide_slot,wide_camera,std::move(band));
         bool placed=true;
-        for(const auto& [e,fresh]:wide_plane)placed&=WidePlace({e,false,fresh&&WideOnArcade(e),wide_layer},graphics);
+        // A build whose world is the shadow's draws alone (an offset window, far planes at their even pace) has no arcade
+        // columns to keep to: its planes stand elsewhere, and an object the arcade has not built yet is drawn whole.
+        for(const auto& [e,fresh]:wide_plane)placed&=WidePlace({e,false,fresh&&!wide.whole&&WideOnArcade(e),wide_layer},graphics);
         wide_plane.clear();return placed;
     }
     // An entry's registers for the layer: x in layer columns, the layer's own clip.
@@ -556,11 +649,11 @@ private:
     // chunk boundary, so its own per-pass values are not state.
     template<class A> void WideFields(A& a){
         const bool enabled=WideEnabled();bool present=enabled;a(present);
-        if(present){wide.LayerFields(a);a(margin_streamer,margin_streaming,wide_walk_entries,wide_walk_drawn,wide_shadow_post,
-                                          wide_real_post,wide_post_key,wide_post_keyed,wide_pending);}
+        if(present){wide.LayerFields(a);wide.EvenFields(a);a(margin_streamer,margin_streaming,wide_walk_entries,wide_walk_drawn,wide_shadow_post,
+                                          wide_real_post,wide_post_key,wide_post_keyed,wide_pending,wide_moving,wide_frame,wide_flights);}
         if constexpr(A::reading){
             if(enabled==present)return;
-            wide.Reset();wide_walk_entries.clear();wide_pending.clear();
+            wide.Reset();wide_walk_entries.clear();wide_pending.clear();wide_moving.clear();wide_frame=0;wide_flights=0;
             wide_walk_drawn=wide_shadow_post=wide_real_post=wide_post_keyed=false;
             wide_post_key=0;margin_streamer=margin_streaming=false;
             if(enabled)EnableWide();

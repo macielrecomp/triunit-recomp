@@ -195,8 +195,8 @@ int wmain(int argc, wchar_t** argv) { mk2::ReplayCapture replay;try {
             uint64_t all=0xcbf29ce484222325ull,centre=all,plain=all;
             for(size_t i=0;i<w.size();++i){all=(all^w[i])*0x100000001b3ull;if(i%n>=margin&&i%n<margin+width)centre=(centre^w[i])*0x100000001b3ull;}
             for(const uint32_t v:scanout.pixels())plain=(plain^v)*0x100000001b3ull;
-            std::printf("{\"wide\":%llu,\"all\":\"%016llx\",\"centre\":\"%016llx\",\"plain\":\"%016llx\",\"faults\":%llu,\"added\":%llu,\"centre_diff\":%llu,\"sentinel\":%llu,\"masked\":%llu,\"outside\":%llu,\"generated\":%llu,\"fault_pc\":%u,\"streamer_skips\":%llu,\"streamer\":%d",(unsigned long long)scanout.frames(),
-                        (unsigned long long)all,(unsigned long long)centre,(unsigned long long)plain,(unsigned long long)live_video.margin_faults,(unsigned long long)scanout.wide_added(),(unsigned long long)scanout.wide_centre(),(unsigned long long)scanout.wide_audit().sentinel,(unsigned long long)scanout.wide_audit().masked,(unsigned long long)scanout.wide_audit().outside,(unsigned long long)scanout.wide_audit().generated,unsigned(live_video.margin_fault_pc),(unsigned long long)live_video.margin_streamer_skips,int(live_video.margin_streamer));
+            std::printf("{\"wide\":%llu,\"all\":\"%016llx\",\"centre\":\"%016llx\",\"plain\":\"%016llx\",\"faults\":%llu,\"added\":%llu,\"centre_diff\":%llu,\"sentinel\":%llu,\"masked\":%llu,\"outside\":%llu,\"generated\":%llu,\"fault_pc\":%u,\"streamer_skips\":%llu,\"streamer\":%d,\"whole\":%d",(unsigned long long)scanout.frames(),
+                        (unsigned long long)all,(unsigned long long)centre,(unsigned long long)plain,(unsigned long long)live_video.margin_faults,(unsigned long long)scanout.wide_added(),(unsigned long long)scanout.wide_centre(),(unsigned long long)scanout.wide_audit().sentinel,(unsigned long long)scanout.wide_audit().masked,(unsigned long long)scanout.wide_audit().outside,(unsigned long long)scanout.wide_audit().generated,unsigned(live_video.margin_fault_pc),(unsigned long long)live_video.margin_streamer_skips,int(live_video.margin_streamer),int(scanout.wide_whole()));
             if(wide_dump.count(scanout.frames())){std::printf(",\"rgb\":\"");for(const uint32_t v:w)std::printf("%06x",unsigned(v&0xffffff));std::printf("\"");}
             std::printf("}\n");
         }
@@ -385,6 +385,8 @@ int wmain(int argc, wchar_t** argv) { mk2::ReplayCapture replay;try {
            ((cmos_host||cmos_live) && valid_host_admitted &&
                 ((cmos_live ? !machine->ValidCmosLiveHostAdmitted() : !machine->ValidCmosHostAdmitted()) || !s.board.HostInputProviderActive())))
             throw std::runtime_error("native profile requires the synchronized genuine CPU boundary");
+        if(sink && window)   // the session's timing, whatever the checks below decide
+            {std::cout.flush();std::clog<<"{\"session_presentation\":"<<window->presentation_json()<<",\"underruns\":"<<sink->Underruns()<<",\"max_producer_gap_ms\":"<<sink->MaxProducerGapMs()<<"}"<<std::endl;}
         if(sink) {
             const auto blocks=s.cycles*16/2000000;
             if(source_samples()<blocks*625+1 || output_samples()<blocks*960+1 ||

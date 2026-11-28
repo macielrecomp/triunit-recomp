@@ -10,6 +10,9 @@
 //     art's end) is counted apart: its world is the shadow's draws, its HUD the real ones.
 //  6. With the camera still, every scenery list's camera is still.
 //  7. No fight frame with a lit picture masks more than a speck (kSpeck pixels) of its margins.
+// 12. Far planes move at an even pace (mk5wide::Layer::even): per arena and scenery list, the list's camera stays within
+//     kPace columns of the straight line between its places at the lowest and highest world camera seen in fight builds
+//     (when those are kPaceRange columns or more apart). A plane held early at its own art's end, or eased, fails.
 //  5. Each scenery layer's draws in the margins move by the same columns per frame as the layer's draws in the centre: per
 //     layer and pair of builds, the most frequent move of its draws (one image on one row, paired in column order) wholly
 //     in the margins equals that of its draws wholly in the centre, when at least 3 draws share it on each side, the
@@ -34,6 +37,7 @@ void check(bool value,const std::string& message){if(!value)throw std::runtime_e
 std::vector<uint8_t> bytes(const std::filesystem::path& p){std::ifstream f(p,std::ios::binary);check(bool(f),"cannot open chip ROM");return {std::istreambuf_iterator<char>(f),{}};}
 template<class V> uint64_t Fnv(uint64_t h,const V& v){for(auto x:v)h=(h^uint64_t(x))*0x100000001b3ull;return h;}
 constexpr uint64_t kBasis=14695981039346656037ull;
+constexpr int kPace=3,kPaceRange=100;
 constexpr uint64_t kSpeck=16;   // masked margin pixels a fight frame may show (a farther layer's pixel at the screen's last column)
 struct Frame{uint64_t state,shown;};
 // The edge coverage table: per arena (camera limits) and scenery layer, the fewest margin columns its art covered.
@@ -48,6 +52,8 @@ struct Run{
     uint64_t shifted_frames=0,shifted_differ=0,shifted_masked=0;
     uint64_t still_checked=0,still_moved=0;   // builds whose last scenery list (the world's) kept its camera; of them, with a list that moved
     uint64_t parallax_checked=0,parallax_differ=0;std::map<std::tuple<int,int,int>,Coverage> coverage;
+    std::map<std::tuple<int,int,int>,std::map<int,std::array<int,2>>> pace;   // arena limits, scenery list -> world camera -> the list's camera, the frame
+    uint64_t pace_checked=0,pace_off=0,ring=0;   // ring: copies of a wrapping far-plane part staged (Mk5LiveVideo::WideRing)
 };
 Run Play(const std::filesystem::path& root,const std::vector<uint32_t>& tape,const std::vector<uint16_t>& cmos,bool widescreen){
     auto program=LoadMk5Program(root/"roms");auto graphics=LoadMk5GlyphBank(root/"roms");
@@ -105,8 +111,11 @@ Run Play(const std::filesystem::path& root,const std::vector<uint32_t>& tape,con
         }
         if(!whole){run.filled+=filled;run.centre+=raw>filled?raw-filled:0;run.presented+=presented>2*filled?presented-2*filled:0;}
         if(std::getenv("WIDE_TRACE")&&!whole&&(filled||raw)){static uint64_t was=0;if(filled!=was){was=filled;std::cerr<<"filled frame "<<before<<" "<<filled<<" raw "<<raw<<" presented "<<presented<<char(10);}}
-        // Diagnostics: WIDE_DUMP_FRAMES (frame numbers, commas) writes each one's presented wide frame as a PPM in WIDE_DUMP_DIR.
-        if(const char* list=std::getenv("WIDE_DUMP_FRAMES");list&&(","+std::string(list)+",").find(","+std::to_string(before)+",")!=std::string::npos){
+        // Diagnostics: WIDE_DUMP_FRAMES (frame numbers, commas) writes each one's presented wide frame as a PPM in WIDE_DUMP_DIR;
+        // WIDE_DUMP_MODE (a mode word's value) writes every 64th frame of that mode (a screen whose frames are not known yet).
+        const char* const dump_list=std::getenv("WIDE_DUMP_FRAMES");const char* const dump_mode=std::getenv("WIDE_DUMP_MODE");
+        if((dump_list&&(","+std::string(dump_list)+",").find(","+std::to_string(before)+",")!=std::string::npos)||
+           (dump_mode&&unsigned(word(mk5widescreen::kMode))==unsigned(std::atoi(dump_mode))&&before%64==0)){
             std::ofstream out(std::filesystem::path(std::getenv("WIDE_DUMP_DIR"))/("wide-"+std::to_string(before)+".ppm"),std::ios::binary);
             out<<"P6"<<char(10)<<W<<" "<<H<<char(10)<<255<<char(10);
             const bool mark=std::getenv("WIDE_DUMP_MASK");   // masked margin pixels in green (a fight frame: soft sides can be the same black)
@@ -126,9 +135,10 @@ Run Play(const std::filesystem::path& root,const std::vector<uint32_t>& tape,con
         }
         // Diagnostics: WIDE_DRAWS_FRAMES lists each one's staged draws per scenery layer and its measured layers.
         if(const char* list=std::getenv("WIDE_DRAWS_FRAMES");list&&(","+std::string(list)+",").find(","+std::to_string(before)+",")!=std::string::npos){
-            std::map<int,std::array<int,4>> per;   // layer -> draws, fixed, lowest column, highest
-            for(const auto& d:layer.placed_done){auto [it,fresh]=per.try_emplace(d.layer,std::array<int,4>{0,0,d.lo,d.hi});auto& v=it->second;++v[0];v[1]+=d.fixed;v[2]=std::min<int>(v[2],d.lo);v[3]=std::max<int>(v[3],d.hi);}
-            for(const auto& [l,v]:per)std::cerr<<"draws frame "<<before<<" layer "<<l<<" n "<<v[0]<<" fixed "<<v[1]<<" x "<<v[2]<<".."<<v[3]<<char(10);
+            std::map<int,std::array<int,6>> per;   // layer -> draws, fixed, lowest column, highest, first line, last
+            for(const auto& d:layer.placed_done){auto [it,fresh]=per.try_emplace(d.layer,std::array<int,6>{0,0,d.lo,d.hi,d.row&255,(d.row&255)+d.rows});auto& v=it->second;++v[0];v[1]+=d.fixed;v[2]=std::min<int>(v[2],d.lo);v[3]=std::max<int>(v[3],d.hi);
+                v[4]=std::min<int>(v[4],d.row&255);v[5]=std::max<int>(v[5],(d.row&255)+d.rows);}
+            for(const auto& [l,v]:per)std::cerr<<"draws frame "<<before<<" layer "<<l<<" n "<<v[0]<<" fixed "<<v[1]<<" x "<<v[2]<<".."<<v[3]<<" y "<<v[4]<<".."<<v[5]<<char(10);
             for(const auto& m:layer.bands_done){int lo=1<<20,hi=-(1<<20);for(const auto& r:m.rows){lo=std::min<int>(lo,r.left);hi=std::max<int>(hi,r.right);}
                 std::cerr<<"band frame "<<before<<" layer "<<m.layer<<" full "<<m.full<<" rows "<<m.rows.size()<<" left>="<<lo<<" right<="<<hi<<char(10);}
         }
@@ -202,6 +212,11 @@ Run Play(const std::filesystem::path& root,const std::vector<uint32_t>& tape,con
                     if(c.first!=g.first)for(const auto& d:margin_pairs[l])std::cerr<<" "<<d;
                     if(c.first!=g.first)std::cerr<<char(10);}
             }
+            // 12: the finished build's lists against the world's camera (the last list's), in a fight under the same limits.
+            {static std::array<int,2> limits_were{1,0};const std::array<int,2> limits{int16_t(word(mk5widescreen::kCameraMin)),int16_t(word(mk5widescreen::kCameraMax))};
+             std::map<uint16_t,int> cameras;for(const auto& k:layer.notes_done)cameras[k.layer]=k.camera;
+             if(fight&&limits==limits_were&&!cameras.empty())for(const auto& [l,c]:cameras)run.pace[{limits[0],limits[1],l}][cameras.rbegin()->second]={c,int(before)};
+             limits_were=limits;}
             previous=layer.notes_done;
         }
         // The edge coverage table (fight frames): per layer measured this build, the margin columns its art covers.
@@ -216,7 +231,15 @@ Run Play(const std::filesystem::path& root,const std::vector<uint32_t>& tape,con
         }
     }
     check(screen.frames()==tape.size(),"legal tape endpoint not reached");
-    run.cmos=f.cmos;run.faults=runner.Video().wide_faults;run.streamer_skips=runner.Video().wide_streamer_skips;
+    for(const auto& [key,at]:run.pace){
+        const int w0=at.begin()->first,p0=at.begin()->second[0],w1=at.rbegin()->first,p1=at.rbegin()->second[0];
+        if(w1-w0<kPaceRange)continue;
+        ++run.pace_checked;
+        for(const auto& [w,place]:at)if(const int line=p0+int(int64_t(p1-p0)*(w-w0)/(w1-w0));std::abs(place[0]-line)>kPace){++run.pace_off;
+            std::cerr<<"pace arena "<<std::get<0>(key)<<".."<<std::get<1>(key)<<" list "<<std::get<2>(key)<<" world camera "<<w<<" list camera "<<place[0]<<" even "<<line<<" frame "<<place[1]
+                     <<" from "<<w0<<":"<<p0<<" to "<<w1<<":"<<p1<<char(10);break;}
+    }
+    run.cmos=f.cmos;run.ring=runner.Video().wide_ring;run.faults=runner.Video().wide_faults;run.streamer_skips=runner.Video().wide_streamer_skips;
     return run;
 }
 std::string Json(const mk5wide::Audit& a){
@@ -244,7 +267,7 @@ int wmain(int argc,wchar_t** argv){
         std::cout<<"{\"frames\":"<<wide.frames.size()<<",\"fight_frames\":"<<wide.fight_frames<<",\"centre_differ\":"<<wide.centre
                  <<",\"presented_differ\":"<<wide.presented<<",\"filled\":"<<wide.filled<<",\"joined\":"<<wide.joined<<",\"masked_frames\":"<<wide.masked_frames<<",\"shifted_frames\":"<<wide.shifted_frames<<",\"shifted_differ\":"<<wide.shifted_differ
                  <<",\"shifted_masked\":"<<wide.shifted_masked<<",\"still_checked\":"<<wide.still_checked<<",\"still_moved\":"<<wide.still_moved<<",\"fight\":"<<Json(wide.fight)<<",\"other\":"<<Json(wide.other)
-                 <<",\"streamer_skips\":"<<wide.streamer_skips<<",\"parallax_checked\":"<<wide.parallax_checked<<",\"parallax_differ\":"<<wide.parallax_differ<<",\"coverage\":[";
+                 <<",\"streamer_skips\":"<<wide.streamer_skips<<",\"ring\":"<<wide.ring<<",\"pace_checked\":"<<wide.pace_checked<<",\"pace_off\":"<<wide.pace_off<<",\"parallax_checked\":"<<wide.parallax_checked<<",\"parallax_differ\":"<<wide.parallax_differ<<",\"coverage\":[";
         bool first=true;
         for(const auto& [key,c]:wide.coverage){
             std::cout<<(first?"":",")<<"["<<std::get<0>(key)<<","<<std::get<1>(key)<<","<<std::get<2>(key)<<","<<c.frames<<","<<c.camera_low<<","<<c.camera_high<<","<<c.left<<","<<c.right<<"]";first=false;
@@ -258,6 +281,7 @@ int wmain(int argc,wchar_t** argv){
         check(!wide.parallax_differ && wide.parallax_checked,"5: a layer moves differently in the margins and in the centre");
         check(!wide.still_moved,"6: a scenery plane moved while the camera stood still");
         check(!wide.masked_frames,"7: a lit fight frame masks part of its margins");
+        check(!wide.pace_off,"12: a far plane does not move at an even pace");
         check(!wide_only,"WIDE_ONLY: diagnostic run, criterion 1 not checked");
         return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
