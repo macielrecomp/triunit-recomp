@@ -26,6 +26,7 @@
   <a href="#the-app-triunitexe">The app</a> ·
   <a href="#build-a-game-from-the-command-line">Command line</a> ·
   <a href="#recomplauncher">RecompLauncher</a> ·
+  <a href="#running-on-linux-with-ge-proton">Linux / Proton</a> ·
   <a href="#roadmap">Roadmap</a> ·
   <a href="#legal-notice">Legal</a>
 </p>
@@ -421,6 +422,27 @@ run with one command:
 ```powershell
 python tools/widescreen/acceptance.py
 ```
+
+## Running on Linux with GE-Proton
+
+There is no Linux or macOS package yet. Until there is, the Windows build can be run on Linux with GE-Proton (tested on Arch/Omarchy with GE-Proton11-12 installed through ProtonUp-Qt). This is community-reported; adjust paths to your install.
+
+```bash
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.local/share/Steam"
+export STEAM_COMPAT_DATA_PATH="$HOME/.local/share/proton-prefixes/triunit"
+export SteamGameId=triunit
+export PROTON_USE_XALIA=0
+P="$HOME/.local/share/Steam/compatibilitytools.d/GE-Proton11-12-x86_64/proton"
+
+mkdir -p "$STEAM_COMPAT_DATA_PATH"
+"$P" run /path/to/TriUnit.exe
+```
+
+Create the prefix directory before the first run, or Proton fails with a `pfx.lock` `FileNotFoundError`. Check the Proton folder name with `ls ~/.local/share/Steam/compatibilitytools.d/`.
+
+The launcher rejects paths it thinks are links or junctions, so copy the extracted project and your ROMs into the prefix's `C:` drive and run from there (`pfx/drive_c/TriUnit/`, with ROMs in `roms/`). Building a game needs the **Windows** Python 3.12+ and MSYS2 g++ installed inside the prefix; Linux Python/GCC do not count. If `pacman-key --init` fails under Wine, the reported workaround is to set `SigLevel = Never` in the prefix's `pacman.conf` temporarily and restore it afterwards — this disables signature checking, so use it only for that install.
+
+See [issue #10](https://github.com/macielrecomp/triunit-recomp/issues/10) for the full step-by-step guide and follow-up discussion.
 
 ## Roadmap
 
